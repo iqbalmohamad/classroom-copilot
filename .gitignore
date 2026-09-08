@@ -22,3 +22,6 @@ next-env.d.ts
 npm-debug.log*
 /tmp-*
 shots.local.mjs
+_bench_*.ts
+*.local.mjs
+*.local.mts
