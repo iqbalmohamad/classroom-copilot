@@ -402,6 +402,7 @@ select {
 }
 
 .bar-track {
+  display: block;
   height: 14px;
   border-radius: 999px;
   background: var(--surface-2);
@@ -409,6 +410,9 @@ select {
 }
 
 .bar-fill {
+  /* The track is a grid item and so is blockified, but this fill is not:
+     without an explicit display it stays inline and its width is ignored. */
+  display: block;
   height: 100%;
   border-radius: 999px;
   background: var(--accent);
@@ -746,6 +750,7 @@ select {
 }
 
 .public-bar-track {
+  display: block;
   height: clamp(22px, 3.4vh, 42px);
   border-radius: 999px;
   background: var(--surface-2);
@@ -753,6 +758,7 @@ select {
 }
 
 .public-bar-fill {
+  display: block;
   height: 100%;
   background: var(--accent);
   border-radius: 999px;

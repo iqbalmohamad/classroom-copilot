@@ -24,7 +24,7 @@
     "zod": "3.25.76"
   },
   "devDependencies": {
-    "@playwright/test": "1.55.0",
+    "@playwright/test": "1.56.0",
     "@types/node": "22.15.3",
     "@types/qrcode": "1.5.5",
     "@types/react": "19.2.7",

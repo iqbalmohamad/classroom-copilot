@@ -298,15 +298,17 @@ function PollCard({
         })}
       </div>
 
-      {selected ? (
-        <p className="small muted">
-          {open ? "Answer sent. You can change it until the poll closes." : "Your answer was sent."}
-        </p>
-      ) : open ? (
-        <p className="small muted">Choose an answer.</p>
-      ) : (
-        <p className="small muted">This poll is closed.</p>
-      )}
+      {/* The closed state is always stated outright: a learner who already
+          answered still needs to know that answering is over. */}
+      <p className="small muted">
+        {open
+          ? selected
+            ? "Answer sent. You can change it until the poll closes."
+            : "Choose an answer."
+          : selected
+            ? "This poll is closed. Your answer was counted."
+            : "This poll is closed."}
+      </p>
 
       {poll.tallies ? (
         <>
