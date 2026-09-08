@@ -42,6 +42,8 @@ export default defineConfig({
       NEXT_PUBLIC_APP_URL: BASE_URL,
       NODE_ENV: "production",
       CC_DISABLE_RATE_LIMIT: "1",
+      // The suites run over plain http on loopback.
+      CC_ALLOW_INSECURE_COOKIES: "1",
     },
   },
 });

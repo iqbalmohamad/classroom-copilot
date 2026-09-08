@@ -183,15 +183,6 @@ export async function instructorSnapshot(
   const activePollRow = polls.find((p) => p.status === "open") ?? null;
   const counts = await countsByValue(polls.map((p) => p.id));
 
-  const answered = activePollRow
-    ? new Set(
-        (
-          await sql<{ participant_id: string }[]>`
-            select participant_id from poll_responses where poll_id = ${activePollRow.id}`
-        ).map((r) => r.participant_id),
-      )
-    : new Set<string>();
-
   const pickCounts = new Map<string, number>(
     pickCountRows.map((row) => [row.participant_id, Number(row.n)]),
   );
@@ -201,10 +192,12 @@ export async function instructorSnapshot(
     displayName: p.display_name,
     present: p.present,
     joinedAt: p.joined_at.toISOString(),
-    pulse: p.pulse,
-    answeredActivePoll: answered.has(p.id),
     pickedCount: pickCounts.get(p.id) ?? 0,
   }));
+
+  // The pulse aggregate is computed here, over present learners, and only the
+  // aggregate leaves this function.
+  const pulseOfPresent = participants.filter((p) => p.present).map((p) => p.pulse);
 
   const present = roster.filter((r) => r.present);
 
@@ -220,7 +213,7 @@ export async function instructorSnapshot(
       ? toPollView(activePollRow, counts.get(activePollRow.id) ?? {}, "instructor")
       : null,
     polls: polls.map((p) => toPollView(p, counts.get(p.id) ?? {}, "instructor")),
-    pulse: summarisePulse(present.map((p) => p.pulse)),
+    pulse: summarisePulse(pulseOfPresent),
     questions: questionRows.map((q) => ({
       id: q.id,
       body: q.body,
@@ -332,14 +325,19 @@ export async function publicSnapshot(room: RoomRow, origin: string): Promise<Pub
       where room_id = ${room.id} and status in ('open', 'closed')
       order by coalesce(opened_at, created_at) desc
       limit 1`,
-    sql<{ id: string; display_name: string; created_at: Date }[]>`
-      select id, display_name, created_at from picks
+    sql<{ display_name: string }[]>`
+      select display_name from picks
       where room_id = ${room.id} order by created_at desc limit 1`,
   ]);
 
   const pollRow = pollRows[0] ?? null;
   const counts = pollRow ? await countsByValue([pollRow.id]) : new Map();
-  const pick = pickRows[0];
+
+  // The projector shows a learner's name only while the instructor has it on
+  // the pick screen, so the payload only carries it then. Hiding it in the
+  // component would not be enough: /state?role=public needs no credential of
+  // any kind, and anyone with the room code can read whatever it returns.
+  const pick = room.public_mode === "pick" && room.status === "open" ? pickRows[0] : undefined;
 
   return {
     role: "public",
@@ -348,8 +346,6 @@ export async function publicSnapshot(room: RoomRow, origin: string): Promise<Pub
     joinUrl: joinUrl(origin, room.code),
     presentCount: Number(presentRows[0]?.n ?? 0),
     activePoll: pollRow ? toPollView(pollRow, counts.get(pollRow.id) ?? {}, "public") : null,
-    lastPick: pick
-      ? { id: pick.id, displayName: pick.display_name, createdAt: pick.created_at.toISOString() }
-      : null,
+    lastPick: pick ? { displayName: pick.display_name } : null,
   };
 }

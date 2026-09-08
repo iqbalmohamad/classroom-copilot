@@ -25,8 +25,6 @@ function snapshot(overrides: Partial<InstructorSnapshot> = {}): InstructorSnapsh
         displayName: "Ada Lovelace",
         present: true,
         joinedAt: "2026-09-13T10:00:00.000Z",
-        pulse: "lost",
-        answeredActivePoll: true,
         pickedCount: 0,
       },
     ],

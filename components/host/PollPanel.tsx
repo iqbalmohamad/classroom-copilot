@@ -33,6 +33,7 @@ export function PollPanel({
 
   const live = snapshot.activePoll ?? snapshot.polls[0] ?? null;
   const isOpen = live?.status === "open";
+  const others = snapshot.polls.filter((poll) => poll.id !== live?.id);
 
   async function launch(openNow: boolean) {
     if (busy || prompt.trim().length === 0) return;
@@ -69,9 +70,6 @@ export function PollPanel({
             disabled={disabled}
             placeholder="Does this make sense so far?"
             onChange={(event) => setPrompt(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") void launch(true);
-            }}
           />
         </div>
 
@@ -154,7 +152,8 @@ export function PollPanel({
           <h2 style={{ fontSize: 19 }}>{live.prompt}</h2>
 
           <p className="small muted">
-            {live.responseCount} of {snapshot.presentCount} here have answered
+            {live.responseCount} {live.responseCount === 1 ? "answer" : "answers"} ·{" "}
+            {snapshot.presentCount} here now
           </p>
 
           {live.tallies ? <TallyBars tallies={live.tallies} /> : null}
@@ -196,21 +195,31 @@ export function PollPanel({
         </section>
       ) : null}
 
-      {snapshot.polls.length > 1 ? (
+      {others.length > 0 ? (
         <section className="card">
-          <div className="card-title">Earlier questions</div>
+          <div className="card-title">Your other questions</div>
           <ul className="list">
-            {snapshot.polls.slice(1).map((poll) => (
+            {others.map((poll) => (
               <li key={poll.id}>
                 <div className="row-between">
                   <span className="grow">{poll.prompt}</span>
-                  <span className="chip">{poll.responseCount} answers</span>
+                  {poll.status === "draft" ? (
+                    <span className="chip">Draft</span>
+                  ) : (
+                    <span className="chip">{poll.responseCount} answers</span>
+                  )}
                   <button
                     className="btn btn-sm"
                     disabled={disabled}
-                    onClick={() => act(`/api/rooms/${code}/polls/${poll.id}`, { action: "open" })}
+                    onClick={() =>
+                      poll.status === "draft"
+                        ? act(`/api/rooms/${code}/polls/${poll.id}`, { action: "open" })
+                        : // A fresh round, not a reopen: reopening would bring the
+                          // previous answers and results back with it.
+                          act(`/api/rooms/${code}/polls/${poll.id}/again`)
+                    }
                   >
-                    Ask again
+                    {poll.status === "draft" ? "Open" : "Ask again"}
                   </button>
                 </div>
               </li>

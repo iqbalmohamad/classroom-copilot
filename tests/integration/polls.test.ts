@@ -236,20 +236,34 @@ describe("polls", () => {
     expect(accepted.status).toBe(200);
   });
 
-  it("shows the instructor who has answered, but never what they answered", async () => {
+  it("never attributes an answer or a pulse to a named learner, anywhere", async () => {
     const { instructor, code } = await createRoom();
     const { learner: ada } = await joinAs(code, "Ada");
     await joinAs(code, "Grace");
     const pollId = await openPoll(instructor, code, { prompt: "Clear?", kind: "yes_no" });
     await ada.post(`/api/rooms/${code}/polls/${pollId}/respond`, { value: "no" });
+    await ada.post(`/api/rooms/${code}/pulse`, { pulse: "lost" });
 
-    const state = await snapshotFor<InstructorSnapshot>(instructor, code, "instructor");
-    const roster = state.body.snapshot.roster;
-    expect(roster.find((r) => r.displayName === "Ada")?.answeredActivePoll).toBe(true);
-    expect(roster.find((r) => r.displayName === "Grace")?.answeredActivePoll).toBe(false);
+    const state = await snapshotFor<InstructorSnapshot & { pulse: { counts: object } }>(
+      instructor,
+      code,
+      "instructor",
+    );
+    const roster = JSON.stringify(state.body.snapshot.roster);
 
-    // No per-learner answer value appears anywhere in the payload.
-    expect(JSON.stringify(roster)).not.toContain('"no"');
+    // The instructor console promises learners two things: that their pulse is
+    // only ever counted, and that no individual answer is shown to anyone.
+    // Neither can be true if the roster payload carries the data — a console
+    // that merely declined to render it would still be one devtools tab, or one
+    // diff of two consecutive stream frames, away from breaking both promises.
+    expect(roster).not.toContain("lost");
+    expect(roster).not.toContain("pulse");
+    expect(roster).not.toContain("answered");
+    expect(roster).not.toContain('"no"');
+
+    // The aggregates the instructor actually needs are still there.
+    expect(state.body.snapshot.pulse.counts).toEqual({ got_it: 0, shaky: 0, lost: 1 });
+    expect(state.body.snapshot.activePoll?.responseCount).toBe(1);
   });
 
   it("can save a poll without opening it", async () => {

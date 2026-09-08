@@ -80,14 +80,22 @@ export interface QuestionView {
   authorName?: string | null;
 }
 
+/**
+ * A roster row.
+ *
+ * Deliberately carries no pulse and no per-poll answer flag. Learners are told
+ * their pulse is reported only as a class aggregate, and the product shows no
+ * individual answers to anyone — so this payload must not contain the data that
+ * would contradict either promise, whatever the console chooses to render.
+ * Watching a named learner's "answered" flag flip while an unrevealed tally
+ * moves would also reconstruct their answer, which is the same leak by a longer
+ * route.
+ */
 export interface RosterEntry {
   id: string;
   displayName: string;
   present: boolean;
   joinedAt: string;
-  pulse: PulseValue | null;
-  /** Whether this learner has responded to the currently active poll. */
-  answeredActivePoll: boolean;
   pickedCount: number;
 }
 
@@ -141,7 +149,8 @@ export interface PublicSnapshot {
   joinUrl: string;
   presentCount: number;
   activePoll: PollView | null;
-  lastPick: PickView | null;
+  /** Only present while the instructor has the projector on the pick screen. */
+  lastPick: { displayName: string } | null;
 }
 
 export type Snapshot = InstructorSnapshot | LearnerSnapshot | PublicSnapshot;

@@ -62,7 +62,13 @@ export function PulsePanel({
       <button
         className="btn btn-sm"
         disabled={disabled || pulse.responded === 0}
-        onClick={() => act(`/api/rooms/${code}/pulse`, undefined, "DELETE")}
+        onClick={() => {
+          // Irreversible and easy to mis-click while reaching for the panel
+          // below, so it gets the same confirmation as ending the class.
+          if (window.confirm("Clear everyone's pulse? Their current answers are lost.")) {
+            void act(`/api/rooms/${code}/pulse`, undefined, "DELETE");
+          }
+        }}
       >
         Reset for next topic
       </button>

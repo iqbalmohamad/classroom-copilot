@@ -49,7 +49,7 @@ test("keeps the class running when the event stream is blocked entirely", async 
 
   // And their answer still lands.
   await learner.getByRole("button", { name: /^Yes/ }).click();
-  await expect(instructor.page.getByText(/1 of 1 here have answered/)).toBeVisible();
+  await expect(instructor.page.getByText(/1 answer · 1 here now/)).toBeVisible();
 
   await context.close();
   await instructor.context.close();
@@ -84,7 +84,7 @@ test("recovers on its own after the learner's device drops offline", async ({ br
 
   // And they can take part again immediately.
   await learner.getByRole("button", { name: /^No/ }).click();
-  await expect(instructor.page.getByText(/1 of 1 here have answered/)).toBeVisible();
+  await expect(instructor.page.getByText(/1 answer · 1 here now/)).toBeVisible();
 
   await context.close();
   await instructor.context.close();

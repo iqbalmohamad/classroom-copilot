@@ -130,6 +130,8 @@ export default async function globalSetup() {
       // Every request in the suite comes from one address; the per-IP limits
       // exist to stop a flood in a real class, not to throttle the tests.
       CC_DISABLE_RATE_LIMIT: "1",
+      // The suites run over plain http on loopback.
+      CC_ALLOW_INSECURE_COOKIES: "1",
     },
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,

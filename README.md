@@ -38,10 +38,11 @@ upvotes, the pulse at the end, and the picker history. Printable.
 | --- | --- |
 | Rooms | Six-character code from an alphabet with no `I L O 0 1`. Join URL and QR. No instructor account. |
 | Learner identity | Anonymous session token in an httpOnly cookie, mirrored in `localStorage`. A refresh rejoins the same identity — it never creates a second roster entry. |
-| Roster | Live, private to the instructor. Presence is derived from a heartbeat, so a learner who drops off simply fades to "away" and comes back on reconnect. |
+| Roster | Live, private to the instructor: names, presence, and who has been called on. Deliberately no pulse and no per-poll answer flag — see Privacy below. |
 | Polls | Yes/No, A–D multiple choice, confidence 1–5. One poll open at a time. One answer per learner, changeable until close. A closed poll rejects answers. |
 | Reveal | The instructor always sees the live distribution. Learners and the shared screen see it only after **Show results on screen**. |
 | Class pulse | One value per learner, replaced on every tap. The instructor sees aggregate counts and percentages only, never who chose what. |
+| Ask again | Putting an earlier question to the class again starts a fresh round rather than reopening the old one, so the projector never shows the previous distribution as the new one. |
 | Questions | Anonymous by default. One upvote per learner (a toggle, so tapping can never inflate it). The instructor can mark answered, reopen, or remove. |
 | Participant picker | Uniform random. Learners who have not been picked yet come first; nobody is picked twice in a row while anyone else is available. Session history is kept. |
 | Session summary | Counts, poll distributions, questions, pulse and picker history. |
@@ -68,6 +69,16 @@ projection built for that role. Supabase is used as Postgres and for session
 persistence; its client-side SDK is not used. This makes the privacy boundary
 application code that can be tested (see `lib/projections.ts` and
 `tests/integration/authorization.test.ts`) rather than a set of RLS policies.
+
+**Privacy is enforced in the payload, not in the components.** Learners are told
+their pulse is only ever counted and that no individual answer is shown to
+anyone, so the instructor snapshot does not carry either — not per-learner pulse,
+not a per-learner "answered" flag (watching that flip against a moving unrevealed
+tally would reconstruct someone's answer). The shared screen's payload carries a
+learner's name only while the instructor has the projector on the pick screen;
+`/state?role=public` needs no credential, so hiding it in the component would not
+be enough. `tests/integration/authorization.test.ts` asserts the contents of each
+role's payload directly.
 
 **Realtime is server-sent events over a version counter, not a change feed.**
 Database triggers bump `rooms.version` on every meaningful change; the stream
@@ -121,6 +132,7 @@ a second browser (or a phone on the same network) to see both sides.
 | `AI_API_KEY` | no | Anthropic key. **Absent means AI Class Read does not exist** — the panel is not rendered and the route refuses. |
 | `AI_MODEL` | no | Defaults to `claude-haiku-4-5-20251001`. |
 | `CC_DISABLE_RATE_LIMIT` | no | Test harnesses only. Never set this on a deployment. |
+| `CC_ALLOW_INSECURE_COOKIES` | no | Drops the `Secure` cookie flag so a local `http://` run works. Set by `npm run dev` and the test harnesses. Never set it on a deployment — session cookies are Secure by default precisely so a missing `NODE_ENV` cannot silently turn that off. |
 
 `.env.local` is gitignored. No secret is committed, and no secret reaches the
 browser: everything above is read only in server code (`lib/env.ts` is marked
@@ -201,7 +213,7 @@ Deployment notes:
 ## Testing
 
 ```bash
-npm test          # 129 tests: 61 unit + 68 integration
+npm test          # 146 tests: 67 unit + 79 integration
 npm run test:e2e  # 5 multi-browser scenarios
 ```
 
@@ -225,6 +237,17 @@ viewports and a shared screen simultaneously, and asserts that state arrives on
 its own — no test reloads a page to make an assertion pass. It covers the whole
 lesson, refreshes on all three surfaces, the privacy boundary from a browser
 that only knows the code, and mobile overflow and touch-target size.
+`e2e/resilience.spec.ts` additionally breaks the network the way a venue does:
+the event stream blocked outright, a phone dropping offline mid-lesson, a
+backgrounded tab, and the shared screen losing its connection.
+
+**Verified by hand at class scale.** Forty learners, each holding a live stream,
+against one server: forty simultaneous joins in ~400ms with forty distinct
+names, a poll reaching every phone in 67–120ms, forty simultaneous answers in
+~160ms with the tally exactly right, and the picker covering all forty in one
+round — no failures. A separate 150-second soak confirmed the stream-cycling
+mechanism a long class depends on: four clean cycles, zero errors, the transport
+never leaving "Live", and a poll opened at the end delivered in 331ms.
 
 Both suites need `DATABASE_URL` set. The e2e suite additionally needs a
 `<database>_e2e` database to exist and be migrated.
@@ -264,10 +287,15 @@ These are real and current, not hypotheticals.
   the documented steps above and takes a few minutes.
 - **Rooms are never cleaned up.** There is no retention policy or expiry job.
   Rows accumulate; for a handful of classes this does not matter.
-- **A lost instructor cookie needs the instructor link.** If the browser that
-  created the room loses both its cookie and its `localStorage`, there is no
-  account to sign back into and no way to recover control of that room. Copy the
-  instructor link before class if this worries you.
+- **A lost instructor cookie needs the instructor link.** The instructor
+  credential lives only in an httpOnly cookie — it is deliberately not kept in
+  `localStorage`, because a console is often opened on a shared classroom
+  machine and a copy there would outlive the lesson and be readable by any
+  script on the origin. The trade-off is that if that cookie is lost there is no
+  account to sign back into. The console's **instructor link** is the recovery
+  path; copy it before class. That link is a long-lived credential in a URL, so
+  it lands in browser history and any proxy log it passes through — treat it
+  like a password.
 - **Rate limits are per server instance, in memory.** On a serverless host each
   instance keeps its own counters, so the effective limit is looser than the
   configured one. This is deliberate: it stops a bored learner flooding the
@@ -282,6 +310,8 @@ These are real and current, not hypotheticals.
 - **Chromium only in the browser suite.** Safari and Firefox have not been
   automated. The learner view was designed mobile-first and uses no
   Chromium-specific APIs, but iOS Safari has not been tested on a real device.
+- **A poll cannot be edited or deleted.** A mistyped question can be closed and
+  the screen set to Blank, but the row stays in the session summary.
 - **AI Class Read is untested against a live provider.** The code path, the
   aggregate-only boundary and every failure mode are tested; no key was
   available here to make a real call.

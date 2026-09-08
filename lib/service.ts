@@ -90,7 +90,23 @@ export async function endRoom(room: RoomRow): Promise<void> {
 }
 
 export async function setPublicMode(room: RoomRow, mode: PublicMode): Promise<void> {
-  await sql`update rooms set public_mode = ${mode} where id = ${room.id}`;
+  await sql.begin(async (tx) => {
+    await tx`update rooms set public_mode = ${mode} where id = ${room.id}`;
+
+    // "Show results on the screen" has to actually show them. Without this the
+    // instructor selects Results, turns to the class, and talks through numbers
+    // the room is not being shown.
+    if (mode === "results") {
+      await tx`
+        update polls set revealed = true
+        where id = (
+          select id from polls
+          where room_id = ${room.id} and status in ('open', 'closed')
+          order by coalesce(opened_at, created_at) desc
+          limit 1
+        )`;
+    }
+  });
 }
 
 // ------------------------------------------------------------ participants
@@ -222,6 +238,43 @@ export async function createPoll(room: RoomRow, input: CreatePollInput): Promise
   });
 }
 
+/**
+ * Ask a previous question again, as a new round.
+ *
+ * Reopening the original row would bring its answers and its revealed results
+ * with it — the projector would show the pre-break distribution as if it were
+ * the new one. A copy starts clean and keeps the old round intact in the
+ * session summary.
+ */
+export async function askAgain(room: RoomRow, pollId: string): Promise<{ id: string }> {
+  assertRoomOpen(room);
+
+  return sql.begin(async (tx) => {
+    await lockRoom(tx, room.id);
+
+    const rows = await tx<{ prompt: string; kind: string; options: unknown }[]>`
+      select prompt, kind, options from polls
+      where id = ${pollId} and room_id = ${room.id}`;
+    const source = rows[0];
+    if (!source) throw new ApiError("not_found", "That poll no longer exists.");
+
+    await closeOpenPolls(tx, room.id);
+
+    const seqRows = await tx<{ next: number }[]>`
+      select coalesce(max(seq), 0) + 1 as next from polls where room_id = ${room.id}`;
+
+    const created = await tx<{ id: string }[]>`
+      insert into polls (room_id, seq, prompt, kind, options, status, opened_at)
+      values (${room.id}, ${seqRows[0]?.next ?? 1}, ${source.prompt}, ${source.kind},
+              ${sql.json(parsePollOptions(source.options) as never)}, 'open', now())
+      returning id`;
+
+    await tx`update rooms set public_mode = 'poll' where id = ${room.id}`;
+    await logEvent(tx, room.id, "poll_asked_again", { from: pollId });
+    return { id: created[0]!.id };
+  });
+}
+
 async function closeOpenPolls(tx: Tx, roomId: string): Promise<void> {
   await tx`update polls set status = 'closed', closed_at = now()
            where room_id = ${roomId} and status = 'open'`;
@@ -245,6 +298,9 @@ export async function actOnPoll(
     if (!current) throw new ApiError("not_found", "That poll no longer exists.");
 
     const result = transition(current, action);
+    // Reopening to collect more answers must not leave the old distribution on
+    // the projector; the instructor reveals again when they are ready.
+    if (result.ok && result.next && action === "open") result.next.revealed = false;
     if (!result.ok || !result.next) {
       throw new ApiError("conflict", result.reason ?? "That poll action is not available.");
     }

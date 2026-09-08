@@ -2,7 +2,6 @@ import "server-only";
 import { cookies } from "next/headers";
 import { sql } from "./db";
 import { tokenMatches } from "./ids";
-import { isProduction } from "./env";
 
 /**
  * Authorisation model
@@ -38,11 +37,19 @@ export function participantCookieName(code: string): string {
   return `${PARTICIPANT_COOKIE_PREFIX}${code}`;
 }
 
+/**
+ * Secure by default, opt out explicitly.
+ *
+ * Keying this off NODE_ENV meant any deployment that did not set it to exactly
+ * "production" — a staging build, a self-hosted container, a preview — silently
+ * shipped session cookies without the Secure flag. Only a local run over plain
+ * http sets CC_ALLOW_INSECURE_COOKIES, and it is documented as such.
+ */
 export function cookieOptions() {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: isProduction(),
+    secure: process.env.CC_ALLOW_INSECURE_COOKIES !== "1",
     path: "/",
     maxAge: COOKIE_MAX_AGE_SECONDS,
   };

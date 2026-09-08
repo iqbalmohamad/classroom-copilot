@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api, ApiRequestError } from "@/lib/client/api";
-import { hostToken } from "@/lib/client/tokens";
 import { normalizeRoomCode } from "@/lib/room-code";
 
 /**
@@ -22,11 +21,8 @@ export function HomeScreen() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const flag = params.get("error");
-    if (flag === "bad-host-link") {
-      setError("That instructor link is no longer valid. Start a new class instead.");
-    } else if (flag === "unknown-room") {
-      setError("That class no longer exists.");
+    if (params.get("error") === "bad-host-link") {
+      setError("That instructor link is not valid for a class we can find. Start a new one.");
     }
   }, [params]);
 
@@ -34,13 +30,12 @@ export function HomeScreen() {
     setCreating(true);
     setError(null);
     try {
-      const result = await api<{ code: string; hostToken: string }>("/api/rooms", {
+      const result = await api<{ code: string }>("/api/rooms", {
         method: "POST",
         body: { title: title.trim() || undefined },
       });
-      // Keep a recovery copy: the httpOnly cookie is authoritative, but a
-      // cleared cookie mid-class must not lock the instructor out of their own room.
-      hostToken.set(result.code, result.hostToken);
+      // The instructor credential stays in its httpOnly cookie. Recovery, if
+      // this browser ever loses it, is the instructor link inside the console.
       router.push(`/r/${result.code}/host`);
     } catch (err) {
       setError(err instanceof ApiRequestError ? err.message : "Could not start the class.");

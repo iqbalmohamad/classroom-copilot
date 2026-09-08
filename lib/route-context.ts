@@ -37,9 +37,25 @@ export async function requireParticipant(
   return participant;
 }
 
-/** Stable per-caller key for rate limiting. Never logged, never stored. */
+/**
+ * Stable per-caller key for rate limiting. Never logged, never stored.
+ *
+ * X-Forwarded-For is a client-supplied header that proxies *append* to, so its
+ * leftmost entry is whatever the caller put there — reading that would let
+ * anyone rotate through fake addresses and bypass every limit. Prefer the
+ * platform's own single-value header, and fall back to the rightmost (closest,
+ * proxy-written) X-Forwarded-For entry rather than the leftmost.
+ */
 export function clientKey(req: Request, scope: string): string {
+  const platform =
+    req.headers.get("x-vercel-forwarded-for") ?? req.headers.get("x-real-ip") ?? "";
+
   const forwarded = req.headers.get("x-forwarded-for") ?? "";
-  const ip = forwarded.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "local";
+  const hops = forwarded
+    .split(",")
+    .map((hop) => hop.trim())
+    .filter(Boolean);
+
+  const ip = platform.trim() || hops[hops.length - 1] || "local";
   return `${scope}:${ip}`;
 }

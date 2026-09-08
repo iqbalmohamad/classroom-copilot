@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Browser-side copies of the room tokens.
+ * Browser-side copy of the learner's room token.
  *
  * The authoritative copy is an httpOnly cookie. This mirror exists because a
  * phone in a real classroom can lose cookies mid-session (private tabs, storage
@@ -12,7 +12,6 @@
  */
 
 const LEARNER = (code: string) => `cc.learner.${code}`;
-const HOST = (code: string) => `cc.host.${code}`;
 
 function read(key: string): string | null {
   try {
@@ -44,24 +43,24 @@ export const learnerToken = {
   clear: (code: string) => drop(LEARNER(code)),
 };
 
-export const hostToken = {
-  get: (code: string) => read(HOST(code)),
-  set: (code: string, token: string) => write(HOST(code), token),
-  clear: (code: string) => drop(HOST(code)),
-};
-
 /** Remembers the last name a learner used, so re-joining is one tap. */
 export const rememberedName = {
   get: () => read("cc.name"),
   set: (name: string) => write("cc.name", name),
 };
 
+/**
+ * Only the learner token is mirrored here.
+ *
+ * The instructor credential is deliberately NOT persisted in the browser: a
+ * console is often opened on a shared classroom machine, and a copy in
+ * localStorage would outlive the lesson, be readable by any script on the
+ * origin, and could not be revoked. The instructor's recovery path is the
+ * "instructor link" in the console, which they choose to save.
+ */
 export function authHeaders(code: string, role: "instructor" | "learner" | "public") {
   const headers: Record<string, string> = {};
-  if (role === "instructor") {
-    const token = hostToken.get(code);
-    if (token) headers["x-cc-host-token"] = token;
-  } else if (role === "learner") {
+  if (role === "learner") {
     const token = learnerToken.get(code);
     if (token) headers["x-cc-learner-token"] = token;
   }

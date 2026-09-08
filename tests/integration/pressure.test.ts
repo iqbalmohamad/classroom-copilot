@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import postgres from "postgres";
-import { BASE_URL, createRoom, joinAs, snapshotFor } from "./client";
+import { BASE_URL, Client, createRoom, joinAs, snapshotFor } from "./client";
 
 /**
  * Two defects that only show up under load, both found by review rather than
@@ -45,61 +45,58 @@ describe("behaviour under pressure", () => {
     expect(state.body.snapshot.pulse.responded).toBe(10);
   });
 
-  it("does not hammer the database while a stream sits on an idle room", async () => {
+  it("does not hammer the database while streams sit on an idle room", async () => {
     const databaseUrl = process.env.CC_TEST_DATABASE_URL ?? process.env.DATABASE_URL!;
     const sql = postgres(databaseUrl, { max: 1, prepare: false, onnotice: () => {} });
-
-    const transactions = async () => {
-      const rows = await sql<{ n: string }[]>`
-        select (xact_commit + xact_rollback)::text as n
-        from pg_stat_database where datname = current_database()`;
-      return Number(rows[0]?.n ?? 0);
-    };
-
-    const sample = async (ms: number) => {
-      const before = await transactions();
-      const start = Date.now();
-      await new Promise((resolve) => setTimeout(resolve, ms));
-      return ((await transactions()) - before) / ((Date.now() - start) / 1000);
-    };
+    const STREAMS = 6;
 
     try {
       const { code } = await createRoom();
       await joinAs(code, "Ada");
 
-      // Measure the MARGINAL cost of one stream rather than the absolute rate:
-      // earlier suites in the same run may still be winding down connections,
-      // and it is the per-client cost that regresses.
-      const idle = await sample(4000);
-
-      const controller = new AbortController();
-      const response = await fetch(`${BASE_URL}/api/rooms/${code}/stream?role=public`, {
-        signal: controller.signal,
-        cache: "no-store",
-      });
-      const reader = response.body!.getReader();
-      void (async () => {
-        try {
-          while (true) {
-            const { done } = await reader.read();
-            if (done) break;
+      const stops: (() => void)[] = [];
+      for (let i = 0; i < STREAMS; i += 1) {
+        const controller = new AbortController();
+        stops.push(() => controller.abort());
+        const response = await fetch(`${BASE_URL}/api/rooms/${code}/stream?role=public`, {
+          signal: controller.signal,
+          cache: "no-store",
+        });
+        const reader = response.body!.getReader();
+        void (async () => {
+          try {
+            while (true) {
+              const { done } = await reader.read();
+              if (done) break;
+            }
+          } catch {
+            /* aborted */
           }
-        } catch {
-          /* aborted */
-        }
-      })();
+        })();
+      }
 
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      const withStream = await sample(6000);
-      controller.abort();
+      // Let earlier suites' connections finish winding down, and let the room
+      // settle past its initial burst of frames.
+      await new Promise((resolve) => setTimeout(resolve, 3000));
 
-      // By design the loop polls one indexed counter every 400ms, so about
-      // 2.5 transactions a second. Rebuilding the whole snapshot on every tick
-      // of an idle room — which is what a stale-tracking bug causes — lands an
-      // order of magnitude above this.
-      const marginal = withStream - idle;
-      expect(marginal).toBeGreaterThan(0.5); // the loop is actually running
-      expect(marginal).toBeLessThan(8); // and is not rebuilding snapshots
+      const read = async () => {
+        const rows = await sql<{ n: string }[]>`
+          select (xact_commit + xact_rollback)::text as n
+          from pg_stat_database where datname = current_database()`;
+        return Number(rows[0]?.n ?? 0);
+      };
+
+      const before = await read();
+      const startedAt = Date.now();
+      await new Promise((resolve) => setTimeout(resolve, 6000));
+      const perSecond = ((await read()) - before) / ((Date.now() - startedAt) / 1000);
+      for (const stop of stops) stop();
+
+      // By design each stream polls one indexed counter every 400ms — about
+      // 2.5 transactions a second, so ~15/s for six. Rebuilding the whole
+      // snapshot on every tick of an idle room, which is what a stale-tracking
+      // bug causes, lands an order of magnitude above this.
+      expect(perSecond).toBeLessThan(STREAMS * 7);
     } finally {
       await sql.end();
     }
@@ -220,5 +217,84 @@ describe("behaviour under pressure", () => {
       expect(votes).toBeGreaterThanOrEqual(0);
       expect(votes).toBeLessThanOrEqual(1);
     }
+  });
+
+  it("asks a question again as a fresh round, not a replay of the old one", async () => {
+    const { instructor, code } = await createRoom();
+    const { learner } = await joinAs(code, "Ada");
+
+    const first = await instructor.post<{ pollId: string }>(`/api/rooms/${code}/polls`, {
+      prompt: "Does this make sense?",
+      kind: "yes_no",
+      openNow: true,
+    });
+    await learner.post(`/api/rooms/${code}/polls/${first.body.pollId}/respond`, { value: "yes" });
+    await instructor.post(`/api/rooms/${code}/polls/${first.body.pollId}`, { action: "reveal" });
+    await instructor.post(`/api/rooms/${code}/polls/${first.body.pollId}`, { action: "close" });
+
+    const again = await instructor.post<{ pollId: string }>(
+      `/api/rooms/${code}/polls/${first.body.pollId}/again`,
+    );
+    expect(again.status).toBe(200);
+    expect(again.body.pollId).not.toBe(first.body.pollId);
+
+    const state = await snapshotFor<{
+      activePoll: { prompt: string; responseCount: number; revealed: boolean };
+      polls: unknown[];
+    }>(instructor, code, "instructor");
+
+    // Same question, clean slate: the projector must not show the previous
+    // round's distribution as if it were the new one.
+    expect(state.body.snapshot.activePoll.prompt).toBe("Does this make sense?");
+    expect(state.body.snapshot.activePoll.responseCount).toBe(0);
+    expect(state.body.snapshot.activePoll.revealed).toBe(false);
+    // ...and the earlier round is still in the record.
+    expect(state.body.snapshot.polls).toHaveLength(2);
+  });
+
+  it("reopening a poll takes the old results back off the shared screen", async () => {
+    const { instructor, code } = await createRoom();
+    const { learner } = await joinAs(code, "Ada");
+    const poll = await instructor.post<{ pollId: string }>(`/api/rooms/${code}/polls`, {
+      prompt: "Reopened",
+      kind: "yes_no",
+      openNow: true,
+    });
+    await learner.post(`/api/rooms/${code}/polls/${poll.body.pollId}/respond`, { value: "yes" });
+    await instructor.post(`/api/rooms/${code}/polls/${poll.body.pollId}`, { action: "reveal" });
+    await instructor.post(`/api/rooms/${code}/polls/${poll.body.pollId}`, { action: "close" });
+    await instructor.post(`/api/rooms/${code}/polls/${poll.body.pollId}`, { action: "open" });
+
+    const projector = new Client("projector");
+    const shown = await snapshotFor<{ activePoll: { tallies: unknown } }>(
+      projector,
+      code,
+      "public",
+    );
+    expect(shown.body.snapshot.activePoll.tallies).toBeNull();
+  });
+
+  it("putting the screen on Results actually reveals them", async () => {
+    const { instructor, code } = await createRoom();
+    const { learner } = await joinAs(code, "Ada");
+    const poll = await instructor.post<{ pollId: string }>(`/api/rooms/${code}/polls`, {
+      prompt: "Show me",
+      kind: "yes_no",
+      openNow: true,
+    });
+    await learner.post(`/api/rooms/${code}/polls/${poll.body.pollId}/respond`, { value: "yes" });
+
+    // Selecting Results without revealing used to leave the room looking at
+    // "Results coming up…" while the instructor talked through numbers nobody
+    // could see.
+    await instructor.post(`/api/rooms/${code}/public-mode`, { mode: "results" });
+
+    const projector = new Client("projector");
+    const shown = await snapshotFor<{ activePoll: { tallies: unknown[] | null } }>(
+      projector,
+      code,
+      "public",
+    );
+    expect(shown.body.snapshot.activePoll.tallies).not.toBeNull();
   });
 });

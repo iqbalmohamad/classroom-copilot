@@ -24,16 +24,35 @@ export function LearnerView({ code }: { code: string }) {
 
   // A learner who already has a session for this room (a refresh, a phone
   // waking up) must land straight back in the class, not on a name form.
+  //
+  // Only a real "you are not a participant" answer shows the join form. A 500,
+  // a rate limit or an offline fetch means we do not know yet — and bouncing
+  // the whole cohort back to the name form on one server hiccup would have them
+  // all re-joining at once, into a shared rate-limit bucket.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    let attempt = 0;
+
+    const probe = async () => {
       try {
         await api(`/api/rooms/${code}/state?role=learner`, { code, role: "learner" });
         if (!cancelled) setJoined(true);
-      } catch {
-        if (!cancelled) setJoined(false);
+      } catch (err) {
+        if (cancelled) return;
+        const status = err instanceof ApiRequestError ? err.status : 500;
+        // 401/403: not a participant. 404: no such room — the join form gives
+        // the precise message when they try, and lets them retype a mistyped
+        // code. Anything else means we simply do not know yet.
+        if (status === 401 || status === 403 || status === 404) {
+          setJoined(false);
+          return;
+        }
+        attempt += 1;
+        window.setTimeout(probe, Math.min(1000 * 2 ** attempt, 8000));
       }
-    })();
+    };
+
+    void probe();
     return () => {
       cancelled = true;
     };
@@ -120,7 +139,8 @@ function JoinForm({ code, onJoined }: { code: string; onJoined: () => void }) {
           {busy ? "Joining…" : "Join class"}
         </button>
         <p className="tiny muted">
-          No account, no password. Your name is visible to your instructor only.
+          No account, no password. Your instructor sees your name, and it appears on the shared
+          screen if you are picked to answer.
         </p>
       </form>
     </main>
@@ -394,7 +414,8 @@ function PulseCard({
         ))}
       </div>
       <p className="tiny muted">
-        Only the overall class mix is shown to your instructor — never who chose what.
+        Your instructor sees the class totals only — never who chose what. Change it whenever you
+        like.
       </p>
     </section>
   );
@@ -470,7 +491,7 @@ function QuestionsCard({
           value={body}
           maxLength={500}
           disabled={disabled}
-          placeholder="What would you like the instructor to explain?"
+          placeholder="What would you like explained?"
           onChange={(event) => setBody(event.target.value)}
           aria-label="Your question"
         />
@@ -481,8 +502,14 @@ function QuestionsCard({
             disabled={disabled}
             onChange={(event) => setAnonymous(event.target.checked)}
           />
-          Send anonymously
+          Ask anonymously
         </label>
+        <p className="tiny muted">
+          Questions are shown to the whole class so people can upvote them.
+          {anonymous
+            ? " Your name is not attached."
+            : " Your name is shown to your instructor, not to the class."}
+        </p>
         <button
           className="btn btn-primary btn-block"
           type="submit"
@@ -492,7 +519,7 @@ function QuestionsCard({
         </button>
         {sent ? (
           <div className="notice notice-ok" role="status">
-            Sent to your instructor.
+            Sent. It is now in the class list below.
           </div>
         ) : null}
       </form>

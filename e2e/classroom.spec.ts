@@ -65,7 +65,7 @@ test.describe("a live class, across five browsers", () => {
     await expect(instructor.page.getByText("Ada", { exact: true })).toBeVisible();
     await expect(instructor.page.getByText("Grace", { exact: true })).toBeVisible();
     await expect(instructor.page.getByText("Alan", { exact: true })).toBeVisible();
-    await expect(instructor.page.getByText(/3 here now/)).toBeVisible();
+    await expect(instructor.page.getByText(/3 here now · 3 joined in total/)).toBeVisible();
 
     // ...and so does the count on the shared screen.
     await expect(screen.page.getByText(/3 learners in the room/)).toBeVisible();
@@ -92,11 +92,11 @@ test.describe("a live class, across five browsers", () => {
       alan.page.getByRole("button", { name: /^Yes/ }).click(),
     ]);
 
-    await expect(instructor.page.getByText(/3 of 3 here have answered/)).toBeVisible();
+    await expect(instructor.page.getByText(/3 answers · 3 here now/)).toBeVisible();
 
     // A learner changing their mind replaces their answer, it does not add one.
     await alan.page.getByRole("button", { name: /^No/ }).click();
-    await expect(instructor.page.getByText(/3 of 3 here have answered/)).toBeVisible();
+    await expect(instructor.page.getByText(/3 answers · 3 here now/)).toBeVisible();
 
     // Learners still cannot see the class split.
     await expect(ada.page.getByText("Class results")).toHaveCount(0);
@@ -190,11 +190,11 @@ test.describe("a live class, across five browsers", () => {
     // Straight back into the room, still named, no join form.
     await expect(ada.page.getByText("Ada", { exact: true })).toBeVisible();
     await expect(ada.page.getByLabel(/your name/i)).toHaveCount(0);
-    await expect(instructor.page.getByText(/3 here now/)).toBeVisible();
+    await expect(instructor.page.getByText(/3 here now · 3 joined in total/)).toBeVisible();
 
     await instructor.page.reload();
     await expect(instructor.page.getByRole("heading", { name: "Async JavaScript" })).toBeVisible();
-    await expect(instructor.page.getByText(/3 here now/)).toBeVisible();
+    await expect(instructor.page.getByText(/3 here now · 3 joined in total/)).toBeVisible();
     // The question survived the reload — now filed under the answered section.
     await expect(queue.getByText("Answered (1)")).toBeVisible();
 

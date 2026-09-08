@@ -19,16 +19,19 @@ export async function GET(req: Request, ctx: { params: Promise<{ code: string }>
   const { code } = await ctx.params;
   const token = new URL(req.url).searchParams.get("t") ?? "";
 
+  // Both failure modes give the same answer. Distinguishing "no such room" from
+  // "wrong token" would turn this unauthenticated endpoint into a free oracle
+  // for sweeping the six-character code space.
+  const refuse = () => NextResponse.redirect(new URL("/?error=bad-host-link", req.url));
+
   let room;
   try {
     room = await loadRoom(code);
   } catch {
-    return NextResponse.redirect(new URL("/?error=unknown-room", req.url));
+    return refuse();
   }
 
-  if (!token || !tokenMatches(token, room.host_token_hash)) {
-    return NextResponse.redirect(new URL(`/?error=bad-host-link`, req.url));
-  }
+  if (!token || !tokenMatches(token, room.host_token_hash)) return refuse();
 
   const jar = await cookies();
   jar.set(hostCookieName(room.code), token, cookieOptions());

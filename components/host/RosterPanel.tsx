@@ -1,22 +1,17 @@
 "use client";
 
-import { PULSE_LABELS, type RosterEntry } from "@/lib/types";
+import type { RosterEntry } from "@/lib/types";
 
 /**
  * The roster — private to the instructor and never included in any learner or
  * public projection.
  *
- * It shows *whether* a learner has answered the live poll, never what they
- * answered: participation is the instructor's business, individual answers are
- * not, and there are no right answers in this product anyway.
+ * It shows who is in the room and who has been called on, and nothing else.
+ * Learners are told their pulse is reported only as a class aggregate, and no
+ * individual poll answer is shown to anyone, so neither appears here — the
+ * snapshot this reads from does not even carry them.
  */
-export function RosterPanel({
-  roster,
-  hasActivePoll,
-}: {
-  roster: RosterEntry[];
-  hasActivePoll: boolean;
-}) {
+export function RosterPanel({ roster }: { roster: RosterEntry[] }) {
   const present = roster.filter((entry) => entry.present);
   const away = roster.filter((entry) => !entry.present);
 
@@ -42,11 +37,10 @@ export function RosterPanel({
                   <span className={entry.present ? "grow" : "grow muted"}>
                     {entry.displayName}
                   </span>
-                  {entry.pulse ? (
-                    <span className="chip tiny">{PULSE_LABELS[entry.pulse]}</span>
-                  ) : null}
-                  {hasActivePoll && entry.answeredActivePoll ? (
-                    <span className="chip chip-live tiny">Answered</span>
+                  {entry.pickedCount > 0 ? (
+                    <span className="chip tiny">
+                      Picked {entry.pickedCount > 1 ? `${entry.pickedCount}×` : ""}
+                    </span>
                   ) : null}
                   {!entry.present ? <span className="chip tiny">Away</span> : null}
                 </div>
@@ -56,7 +50,8 @@ export function RosterPanel({
         </div>
       )}
       <p className="tiny muted" style={{ marginTop: 10 }}>
-        Private to you. Never shown on the shared screen.
+        Private to you. Never shown on the shared screen. Pulse and poll answers
+        are only ever counted, never attributed.
       </p>
     </section>
   );

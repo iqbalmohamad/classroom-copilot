@@ -1,9 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
 import { api, ApiRequestError } from "@/lib/client/api";
-import { hostToken } from "@/lib/client/tokens";
 import { useRoomState } from "@/lib/client/useRoomState";
 import { ConnectionBadge } from "@/components/ConnectionBadge";
 import { SharePanel } from "@/components/host/SharePanel";
@@ -26,20 +25,15 @@ export function HostConsole({
   code,
   joinUrl,
   qr,
-  origin,
+  hostToken,
 }: {
   code: string;
   joinUrl: string;
   qr: string | null;
-  origin: string;
+  hostToken: string | null;
 }) {
   const { snapshot, connection, refresh } = useRoomState(code, "instructor");
   const [error, setError] = useState<string | null>(null);
-  const [savedToken, setSavedToken] = useState<string | null>(null);
-
-  useEffect(() => {
-    setSavedToken(hostToken.get(code));
-  }, [code]);
 
   const act = useCallback(
     async (path: string, body?: unknown, method: "POST" | "DELETE" = "POST") => {
@@ -58,16 +52,24 @@ export function HostConsole({
   );
 
   if (connection === "denied") {
+    // A captive portal or a filtered request can produce a single 403 mid-class.
+    // Offer a way back into the room rather than a dead end.
     return (
       <main className="page page-narrow stack">
         <h1 style={{ fontSize: 24 }}>Instructor access needed</h1>
         <p className="muted">
-          This browser is not signed in as the instructor for class <strong>{code}</strong>. Open
-          the console from the device that started the class, or use the instructor link you saved.
+          This browser is not signed in as the instructor for class <strong>{code}</strong>. If you
+          were teaching a moment ago, this is usually a network hiccup — try again. Otherwise open
+          the console on the device that started the class, or use the instructor link you saved.
         </p>
-        <Link className="btn" href="/">
-          Back to start
-        </Link>
+        <div className="btn-group">
+          <button className="btn btn-primary" onClick={refresh}>
+            Try again
+          </button>
+          <Link className="btn" href="/">
+            Back to start
+          </Link>
+        </div>
       </main>
     );
   }
@@ -126,8 +128,7 @@ export function HostConsole({
             code={code}
             joinUrl={joinUrl}
             qr={qr}
-            origin={origin}
-            hostToken={savedToken}
+            hostToken={hostToken}
             publicMode={snapshot.room.publicMode}
             disabled={ended}
             act={act}
@@ -135,7 +136,7 @@ export function HostConsole({
           <PulsePanel pulse={snapshot.pulse} disabled={ended} act={act} code={code} />
           <PickerPanel picks={snapshot.picks} disabled={ended} act={act} code={code} />
           {snapshot.aiEnabled ? <ClassReadPanel code={code} disabled={ended} /> : null}
-          <RosterPanel roster={snapshot.roster} hasActivePoll={snapshot.activePoll !== null} />
+          <RosterPanel roster={snapshot.roster} />
           {!ended ? (
             <button
               className="btn btn-danger btn-block"

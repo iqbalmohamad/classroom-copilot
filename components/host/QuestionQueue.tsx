@@ -71,9 +71,13 @@ export function QuestionQueue({
                   <button
                     className="btn btn-sm btn-danger"
                     disabled={disabled}
-                    onClick={() =>
-                      act(`/api/rooms/${code}/questions/${question.id}`, { action: "hide" })
-                    }
+                    onClick={() => {
+                      // Sits next to "Answered" and takes the question off every
+                      // learner's screen, so a mis-tap is silent and public.
+                      if (window.confirm("Remove this question from everyone's screen?")) {
+                        void act(`/api/rooms/${code}/questions/${question.id}`, { action: "hide" });
+                      }
+                    }}
                     title="Remove this question from every learner's screen"
                   >
                     Hide

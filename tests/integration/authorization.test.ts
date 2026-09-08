@@ -189,3 +189,41 @@ describe("authorisation and privacy boundaries", () => {
     expect(payload).not.toContain("node_modules");
   });
 });
+
+describe("the shared screen shows only what the instructor has put on it", () => {
+  it("does not carry a learner's name unless the projector is on the pick screen", async () => {
+    const { instructor, code } = await createRoom();
+    await joinAs(code, "Ada Lovelace");
+    await instructor.post(`/api/rooms/${code}/pick`);
+
+    const projector = new Client("projector");
+
+    // Picking switches the screen to the pick view, so the name is in scope.
+    const onPick = await snapshotFor(projector, code, "public");
+    expect(JSON.stringify(onPick.body)).toContain("Ada Lovelace");
+
+    // Move the screen on, and the name must leave the payload — not merely stop
+    // being rendered. /state?role=public needs no credential at all.
+    await instructor.post(`/api/rooms/${code}/public-mode`, { mode: "join" });
+    const afterwards = await snapshotFor(projector, code, "public");
+    expect(JSON.stringify(afterwards.body)).not.toContain("Ada Lovelace");
+
+    // ...and the same once the class is over.
+    await instructor.post(`/api/rooms/${code}/public-mode`, { mode: "pick" });
+    await instructor.post(`/api/rooms/${code}/end`);
+    const ended = await snapshotFor(projector, code, "public");
+    expect(JSON.stringify(ended.body)).not.toContain("Ada Lovelace");
+  });
+
+  it("never puts a database identifier on the shared screen", async () => {
+    const { instructor, code } = await createRoom();
+    await joinAs(code, "Ada");
+    await instructor.post(`/api/rooms/${code}/pick`);
+
+    const projector = new Client("projector");
+    const payload = JSON.stringify((await snapshotFor(projector, code, "public")).body);
+    // No UUIDs anywhere except the poll and option identifiers a learner needs.
+    const uuids = payload.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g);
+    expect(uuids).toBeNull();
+  });
+});

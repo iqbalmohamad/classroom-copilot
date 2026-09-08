@@ -1,7 +1,8 @@
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { HostConsole } from "./HostConsole";
 import { normalizeRoomCode } from "@/lib/room-code";
 import { qrDataUrl } from "@/lib/qr";
+import { hostCookieName } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -19,5 +20,11 @@ export default async function Page({ params }: { params: Promise<{ code: string 
   const joinUrl = `${origin}/r/${code}`;
   const qr = await qrDataUrl(joinUrl);
 
-  return <HostConsole code={code} joinUrl={joinUrl} qr={qr} origin={origin} />;
+  // The instructor's own credential, read from their own cookie on their own
+  // request. It is handed to the console purely so the "instructor link" can be
+  // composed; the browser never stores it.
+  const jar = await cookies();
+  const hostToken = jar.get(hostCookieName(code))?.value ?? null;
+
+  return <HostConsole code={code} joinUrl={joinUrl} qr={qr} hostToken={hostToken} />;
 }
