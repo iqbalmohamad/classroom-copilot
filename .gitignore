@@ -1,0 +1,23 @@
+node_modules/
+.next/
+out/
+build/
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+*.tsbuildinfo
+next-env.d.ts
+
+# Local env — never commit secrets
+.env
+.env.local
+.env.*.local
+.env.production
+.env.test.local
+
+.vercel
+.DS_Store
+npm-debug.log*
+/tmp-*
