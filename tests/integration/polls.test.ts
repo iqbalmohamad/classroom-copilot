@@ -162,6 +162,10 @@ describe("polls", () => {
     const state = await snapshotFor<InstructorSnapshot>(instructor, code, "instructor");
     const poll = state.body.snapshot.polls.find((p) => p.id === pollId);
     const accepted = responses.filter((r) => r.status === 200).length - 1; // minus the close
+
+    // Consistency alone would also hold if the close won every race and nothing
+    // was recorded, so pin a floor too: answers sent before the close must land.
+    expect(accepted).toBeGreaterThan(0);
     expect(poll?.responseCount).toBe(accepted);
   });
 

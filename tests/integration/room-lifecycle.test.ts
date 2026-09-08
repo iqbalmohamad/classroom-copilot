@@ -52,12 +52,40 @@ describe("room lifecycle", () => {
     expect(summary.status).toBe(200);
   });
 
-  it("keeps the instructor signed in across a page reload", async () => {
+  it("keeps the instructor signed in on a browser that only has the cookie", async () => {
     const { instructor, code } = await createRoom();
-    // A reload is simply another request carrying the same cookie jar.
-    const first = await snapshotFor(instructor, code, "instructor");
-    const second = await snapshotFor(instructor, code, "instructor");
-    expect(first.status).toBe(200);
-    expect(second.status).toBe(200);
+
+    // Model a reload properly: a brand new client that has nothing but the
+    // cookie the create response set. Two identical requests from the same jar
+    // would prove nothing about the cookie at all.
+    const cookie = instructor.cookieHeader();
+    expect(cookie).toContain(`cc_host_${code}`);
+
+    const reloaded = new Client("reloaded tab");
+    const result = await reloaded.request<{ snapshot: { role: string } }>(
+      `/api/rooms/${code}/state?role=instructor`,
+      { headers: { cookie } },
+    );
+    expect(result.status).toBe(200);
+    expect(result.body.snapshot.role).toBe("instructor");
+
+    // ...and a browser without it is refused.
+    const stranger = new Client("stranger");
+    expect((await stranger.get(`/api/rooms/${code}/state?role=instructor`)).status).toBe(403);
+  });
+
+  it("sets the instructor cookie httpOnly and same-site", async () => {
+    const client = new Client("instructor");
+    const created = await client.request<{ code: string }>("/api/rooms", {
+      method: "POST",
+      body: {},
+    });
+    expect(created.status).toBe(200);
+
+    const cookie = client.setCookies.find((raw) => raw.startsWith("cc_host_"));
+    expect(cookie).toBeDefined();
+    expect(cookie!.toLowerCase()).toContain("httponly");
+    expect(cookie!.toLowerCase()).toContain("samesite=lax");
+    expect(cookie!.toLowerCase()).toContain("path=/");
   });
 });

@@ -32,6 +32,10 @@ async function main() {
         name       text primary key,
         applied_at timestamptz not null default now()
       )`;
+    // The application tables get RLS from the migration itself; this one is
+    // created here, so it needs the same deny-by-default backstop or it would
+    // be readable through Supabase's PostgREST endpoint.
+    await sql`alter table schema_migrations enable row level security`;
 
     const applied = new Set(
       (await sql<{ name: string }[]>`select name from schema_migrations`).map((r) => r.name),
@@ -51,11 +55,36 @@ async function main() {
     }
 
     console.log(count === 0 ? "Database already up to date." : `Applied ${count} migration(s).`);
+    await verifyOwnership(sql);
   } catch (error) {
     console.error("\nMigration failed:", error instanceof Error ? error.message : error);
     process.exitCode = 1;
   } finally {
     await sql.end();
+  }
+}
+
+/**
+ * The RLS backstop only works because a table's owner bypasses RLS. If the
+ * migrations were run by a different role than the application uses, the app is
+ * denied by its own security net — and the failure would look like a mysterious
+ * "no rows" rather than a configuration mistake. Say so here instead.
+ */
+async function verifyOwnership(sql: postgres.Sql) {
+  const rows = await sql<{ tablename: string; tableowner: string; role: string }[]>`
+    select tablename, tableowner, current_user as role
+    from pg_tables
+    where schemaname = 'public' and tablename in ('rooms', 'participants', 'polls')`;
+
+  const wrong = rows.filter((row) => row.tableowner !== row.role);
+  if (wrong.length > 0) {
+    console.warn(
+      `\nWARNING: these tables are owned by "${wrong[0]!.tableowner}" but you are ` +
+        `connected as "${wrong[0]!.role}".\n` +
+        "Row-level security is enabled with no policies as a deny-by-default backstop, " +
+        "and only the table owner bypasses it. Run migrations as the same role the " +
+        "application connects with, or the application will be denied its own data.",
+    );
   }
 }
 

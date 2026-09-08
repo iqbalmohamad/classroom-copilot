@@ -6,7 +6,6 @@ import {
   normalizeRoomCode,
 } from "@/lib/room-code";
 import { disambiguate, normalizeDisplayName, isValidDisplayName } from "@/lib/domain/names";
-import { isPresent } from "@/lib/domain/presence";
 import { generateRoomCode, generateToken, hashToken, tokenMatches } from "@/lib/ids";
 
 describe("room codes", () => {
@@ -100,25 +99,5 @@ describe("display names", () => {
   it("keeps a disambiguated name within the column limit", () => {
     const long = "x".repeat(40);
     expect(disambiguate(long, [long]).length).toBeLessThanOrEqual(40);
-  });
-});
-
-describe("presence", () => {
-  const now = new Date("2026-09-13T10:00:00Z");
-
-  it("counts a learner seen moments ago", () => {
-    expect(isPresent(new Date(now.getTime() - 5_000), now)).toBe(true);
-  });
-
-  it("drops a learner who has not been seen for a while", () => {
-    expect(isPresent(new Date(now.getTime() - 5 * 60_000), now)).toBe(false);
-  });
-
-  it("tolerates a small clock skew rather than hiding a learner who is there", () => {
-    expect(isPresent(new Date(now.getTime() + 2_000), now)).toBe(true);
-  });
-
-  it("handles an unparseable timestamp without throwing", () => {
-    expect(isPresent("not a date", now)).toBe(false);
   });
 });

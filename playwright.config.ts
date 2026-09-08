@@ -18,6 +18,9 @@ const databaseUrl =
 
 export default defineConfig({
   testDir: "./e2e",
+  // Creates and migrates the suite's own database, and rebuilds, so a green run
+  // always reflects the code in the working tree.
+  globalSetup: "./e2e/global-setup.ts",
   timeout: 90_000,
   expect: { timeout: 15_000 },
   // One room, several clients: the specs must not race each other.
@@ -39,9 +42,10 @@ export default defineConfig({
     timeout: 120_000,
     env: {
       DATABASE_URL: databaseUrl,
-      NEXT_PUBLIC_APP_URL: BASE_URL,
+      APP_ORIGIN: BASE_URL,
       NODE_ENV: "production",
       CC_DISABLE_RATE_LIMIT: "1",
+      AI_API_KEY: "",
       // The suites run over plain http on loopback.
       CC_ALLOW_INSECURE_COOKIES: "1",
     },

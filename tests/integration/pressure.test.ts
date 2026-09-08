@@ -297,4 +297,27 @@ describe("behaviour under pressure", () => {
     );
     expect(shown.body.snapshot.activePoll.tallies).not.toBeNull();
   });
+
+  it("puts every screen state on the projector on request", async () => {
+    const { instructor, code } = await createRoom();
+    await joinAs(code, "Ada");
+    await instructor.post(`/api/rooms/${code}/polls`, {
+      prompt: "Screen states",
+      kind: "yes_no",
+      openNow: true,
+    });
+
+    const projector = new Client("projector");
+    for (const mode of ["join", "poll", "results", "pick", "waiting"] as const) {
+      const set = await instructor.post(`/api/rooms/${code}/public-mode`, { mode });
+      expect(set.status, `instructor should be able to select ${mode}`).toBe(200);
+
+      const shown = await snapshotFor<{ room: { publicMode: string } }>(
+        projector,
+        code,
+        "public",
+      );
+      expect(shown.body.snapshot.room.publicMode).toBe(mode);
+    }
+  });
 });

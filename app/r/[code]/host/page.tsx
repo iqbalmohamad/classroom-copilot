@@ -2,6 +2,7 @@ import { cookies, headers } from "next/headers";
 import { HostConsole } from "./HostConsole";
 import { normalizeRoomCode } from "@/lib/room-code";
 import { qrDataUrl } from "@/lib/qr";
+import { requestOrigin } from "@/lib/origin";
 import { hostCookieName } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -10,12 +11,10 @@ export default async function Page({ params }: { params: Promise<{ code: string 
   const { code: raw } = await params;
   const code = normalizeRoomCode(raw);
 
+  // One derivation for the whole app, so the QR, the join link and the API all
+  // agree on where this deployment lives.
   const headerList = await headers();
-  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  const host = headerList.get("x-forwarded-host") ?? headerList.get("host") ?? "localhost:3000";
-  const proto =
-    headerList.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  const origin = (configured || `${proto}://${host}`).replace(/\/+$/, "");
+  const origin = requestOrigin(new Request("https://placeholder.invalid", { headers: headerList }));
 
   const joinUrl = `${origin}/r/${code}`;
   const qr = await qrDataUrl(joinUrl);

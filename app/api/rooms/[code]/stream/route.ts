@@ -163,7 +163,6 @@ export async function GET(req: Request, ctx: { params: Promise<{ code: string }>
     headers: {
       "content-type": "text/event-stream; charset=utf-8",
       "cache-control": "no-cache, no-store, no-transform",
-      connection: "keep-alive",
       // Disables response buffering on nginx-style proxies.
       "x-accel-buffering": "no",
     },

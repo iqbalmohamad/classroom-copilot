@@ -1,15 +1,15 @@
 import "server-only";
+import { appOrigin } from "./env";
 
 /**
  * The public origin used to build join URLs and QR codes.
  *
- * NEXT_PUBLIC_APP_URL wins when set (deployments behind a custom domain), and
- * otherwise we trust the forwarded host headers that the platform sets. Falls
- * back to the local dev origin.
+ * APP_ORIGIN wins when set, which is what a deployment should do. Otherwise we
+ * fall back to the request's own headers.
  */
 export function requestOrigin(req: Request): string {
-  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (configured) return configured.replace(/\/+$/, "");
+  const configured = appOrigin();
+  if (configured) return configured;
 
   // `host` is set by the platform from the request line; `x-forwarded-host` is
   // whatever the client sent unless a proxy overwrites it. Preferring the

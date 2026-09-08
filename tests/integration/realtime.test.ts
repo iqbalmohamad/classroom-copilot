@@ -60,7 +60,7 @@ async function openStream(path: string, cookie?: string): Promise<StreamReader> 
   return {
     events,
     close: () => controller.abort(),
-    waitFor(predicate, ms = 10_000) {
+    waitFor(predicate, ms = 4_000) {
       const deadline = Date.now() + ms;
       return new Promise((resolve, reject) => {
         const check = () => {
@@ -74,13 +74,6 @@ async function openStream(path: string, cookie?: string): Promise<StreamReader> 
       });
     },
   };
-}
-
-function cookieHeader(client: Client): string {
-  // The test client keeps cookies privately; re-read them via a request that
-  // echoes nothing, so instead we rely on the documented header fallback.
-  void client;
-  return "";
 }
 
 describe("realtime stream", () => {
@@ -97,18 +90,82 @@ describe("realtime stream", () => {
     }
   });
 
-  it("pushes an update to the shared screen when a learner joins", async () => {
+  it("pushes an update to the shared screen when a learner joins, promptly", async () => {
     const { code } = await createRoom();
     const stream = await openStream(`/api/rooms/${code}/stream?role=public`);
     try {
       await stream.waitFor((event) => event.type === "state");
+      const startedAt = Date.now();
       await joinAs(code, "Ada");
 
       const update = await stream.waitFor((event) => {
         if (event.type !== "state") return false;
         return JSON.parse(event.data).presentCount === 1;
       });
+      const latency = Date.now() - startedAt;
+
       expect(JSON.parse(update.data).presentCount).toBe(1);
+      // The loop also re-emits every 10s regardless of change, so an assertion
+      // that only waits for eventual arrival would pass even if push-on-change
+      // were completely broken. Pin the latency instead.
+      expect(latency).toBeLessThan(2_000);
+    } finally {
+      stream.close();
+    }
+  });
+
+  it("pushes the instructor's own view: a join reaches the console live", async () => {
+    const { instructor, code } = await createRoom();
+    const stream = await openStream(
+      `/api/rooms/${code}/stream?role=instructor`,
+      instructor.cookieHeader(),
+    );
+    try {
+      const first = await stream.waitFor((event) => event.type === "state");
+      expect(JSON.parse(first.data).role).toBe("instructor");
+
+      const startedAt = Date.now();
+      await joinAs(code, "Ada");
+      const update = await stream.waitFor((event) => {
+        if (event.type !== "state") return false;
+        const snapshot = JSON.parse(event.data);
+        return snapshot.roster?.some((r: { displayName: string }) => r.displayName === "Ada");
+      });
+      expect(Date.now() - startedAt).toBeLessThan(2_000);
+      expect(JSON.parse(update.data).roster).toHaveLength(1);
+    } finally {
+      stream.close();
+    }
+  });
+
+  it("pushes a learner's own view, and never another learner's data", async () => {
+    const { instructor, code } = await createRoom();
+    const { learner } = await joinAs(code, "Ada");
+    await joinAs(code, "Grace Hopper");
+
+    const stream = await openStream(
+      `/api/rooms/${code}/stream?role=learner`,
+      learner.cookieHeader(),
+    );
+    try {
+      const first = await stream.waitFor((event) => event.type === "state");
+      const snapshot = JSON.parse(first.data);
+      expect(snapshot.role).toBe("learner");
+      expect(snapshot.me.displayName).toBe("Ada");
+      expect(first.data).not.toContain("Grace Hopper");
+      expect(first.data).not.toContain("roster");
+
+      const startedAt = Date.now();
+      await instructor.post(`/api/rooms/${code}/polls`, {
+        prompt: "Reaching the phone?",
+        kind: "yes_no",
+        openNow: true,
+      });
+      await stream.waitFor((event) => {
+        if (event.type !== "state") return false;
+        return JSON.parse(event.data).activePoll?.prompt === "Reaching the phone?";
+      });
+      expect(Date.now() - startedAt).toBeLessThan(2_000);
     } finally {
       stream.close();
     }
@@ -120,6 +177,7 @@ describe("realtime stream", () => {
     try {
       await stream.waitFor((event) => event.type === "state");
 
+      const startedAt = Date.now();
       await instructor.post(`/api/rooms/${code}/polls`, {
         prompt: "Is this landing live?",
         kind: "yes_no",
@@ -131,6 +189,7 @@ describe("realtime stream", () => {
         return JSON.parse(event.data).activePoll?.prompt === "Is this landing live?";
       });
       const snapshot = JSON.parse(update.data);
+      expect(Date.now() - startedAt).toBeLessThan(2_000);
       expect(snapshot.room.publicMode).toBe("poll");
       expect(snapshot.activePoll.tallies).toBeNull();
     } finally {
@@ -169,5 +228,3 @@ describe("realtime stream", () => {
     expect(after.body.snapshot.version).toBe(before.body.snapshot.version);
   });
 });
-
-void cookieHeader;

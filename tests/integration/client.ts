@@ -16,6 +16,9 @@ export interface Result<T> {
 export class Client {
   private cookies = new Map<string, string>();
 
+  /** Raw Set-Cookie values from the most recent response, for attribute checks. */
+  setCookies: string[] = [];
+
   constructor(readonly label: string) {}
 
   /** Simulates a browser that has lost its cookies but kept a token copy. */
@@ -23,7 +26,7 @@ export class Client {
 
   async request<T = unknown>(
     path: string,
-    options: { method?: string; body?: unknown } = {},
+    options: { method?: string; body?: unknown; headers?: Record<string, string> } = {},
   ): Promise<Result<T>> {
     const headers: Record<string, string> = {};
     if (options.body !== undefined) headers["content-type"] = "application/json";
@@ -31,6 +34,7 @@ export class Client {
       headers.cookie = [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
     }
     if (this.headerToken) headers[this.headerToken.name] = this.headerToken.value;
+    Object.assign(headers, options.headers ?? {});
 
     const response = await fetch(`${BASE_URL}${path}`, {
       method: options.method ?? "GET",
@@ -40,7 +44,8 @@ export class Client {
       redirect: "manual",
     });
 
-    for (const raw of response.headers.getSetCookie?.() ?? []) {
+    this.setCookies = response.headers.getSetCookie?.() ?? [];
+    for (const raw of this.setCookies) {
       const [pair] = raw.split(";");
       const index = pair?.indexOf("=") ?? -1;
       if (!pair || index < 0) continue;
@@ -74,6 +79,11 @@ export class Client {
   /** Throws away this client's cookies, like a fresh private tab. */
   clearCookies() {
     this.cookies.clear();
+  }
+
+  /** This client's cookies, for transports that cannot go through request(). */
+  cookieHeader(): string {
+    return [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
   }
 }
 

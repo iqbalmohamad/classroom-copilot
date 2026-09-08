@@ -9,7 +9,9 @@ const nextConfig: NextConfig = {
       {
         source: "/api/:path*",
         headers: [
-          { key: "Cache-Control", value: "no-store, no-cache, must-revalidate" },
+          // no-transform matters: it is what stops an intermediary compressing or
+          // re-chunking the event stream, which is how SSE gets buffered to death.
+          { key: "Cache-Control", value: "no-store, no-cache, must-revalidate, no-transform" },
           { key: "X-Content-Type-Options", value: "nosniff" },
         ],
       },

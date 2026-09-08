@@ -176,14 +176,45 @@ test.describe("a live class, across five browsers", () => {
     await expect(picked.page.getByText(/you have been picked/i)).toBeVisible();
 
     // --- the shared screen never leaks anything private --------------------
-    const screenText = (await screen.page.locator("body").innerText()).toLowerCase();
-    expect(screenText).not.toContain("why does await");
-    expect(screenText).not.toContain("class pulse");
-    expect(screenText).not.toContain("who is here");
-    for (const name of ["Ada", "Grace", "Alan"]) {
-      if (name === pickedName) continue;
-      expect(screenText).not.toContain(name.toLowerCase());
-    }
+    //
+    // Swept across every state the instructor can put it in, asserting both
+    // what each one must show and that no learner's name appears except the
+    // one being called on.
+    const others = ["Ada", "Grace", "Alan"].filter((name) => name !== pickedName);
+
+    const sweep = async (label: string) => {
+      const text = (await screen.page.locator("body").innerText()).toLowerCase();
+      expect(text, `${label}: leaked a question`).not.toContain("why does await");
+      expect(text, `${label}: leaked the pulse`).not.toContain("got it");
+      expect(text, `${label}: leaked the roster`).not.toContain("who is here");
+      for (const name of others) {
+        expect(text, `${label}: leaked ${name}`).not.toContain(name.toLowerCase());
+      }
+      return text;
+    };
+
+    await expect(screen.page.locator(".public-pick")).toHaveText(pickedName);
+    await sweep("pick");
+
+    await instructor.page.getByRole("button", { name: "Join screen" }).click();
+    await expect(screen.page.locator(".public-join-code")).toHaveText(code);
+    expect(await sweep("join")).not.toContain(pickedName.toLowerCase());
+
+    await instructor.page.getByRole("button", { name: "Question", exact: true }).click();
+    await expect(screen.page.getByText("Is a Promise eager?")).toBeVisible();
+    await sweep("question");
+
+    await instructor.page.getByRole("button", { name: "Results", exact: true }).click();
+    await expect(screen.page.getByText("%").first()).toBeVisible();
+    await sweep("results");
+
+    await instructor.page.getByRole("button", { name: "Blank" }).click();
+    await expect(screen.page.getByText(/back in a moment/i)).toBeVisible();
+    expect(await sweep("blank")).not.toContain(pickedName.toLowerCase());
+
+    // Put it back on the pick for the reload check below.
+    await instructor.page.getByRole("button", { name: "Picked learner" }).click();
+    await expect(screen.page.locator(".public-pick")).toHaveText(pickedName);
 
     // --- refreshes must not break the class --------------------------------
     await ada.page.reload();
@@ -283,9 +314,13 @@ test.describe("the learner view on a phone", () => {
     const count = await controls.count();
     expect(count).toBeGreaterThan(5);
     for (let i = 0; i < count; i += 1) {
-      const box = await controls.nth(i).boundingBox();
-      if (!box) continue;
-      expect(box.height, `control ${i} is too small to tap`).toBeGreaterThanOrEqual(36);
+      const control = controls.nth(i);
+      const label = (await control.textContent())?.trim() || `control ${i}`;
+      const box = await control.boundingBox();
+      // A missing box means collapsed or zero-sized, which is worse than small.
+      expect(box, `"${label}" has no box on a phone`).not.toBeNull();
+      expect(box!.height, `"${label}" is too small to tap`).toBeGreaterThanOrEqual(44);
+      expect(box!.width, `"${label}" is too narrow to tap`).toBeGreaterThanOrEqual(44);
     }
 
     await instructor.context.close();

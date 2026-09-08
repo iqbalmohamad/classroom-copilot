@@ -118,18 +118,35 @@ describe("authorisation and privacy boundaries", () => {
     await learner.post(`/api/rooms/${code}/questions`, { body: "A private question" });
 
     const projector = new Client("projector");
-    const result = await snapshotFor(projector, code, "public");
+    const result = await snapshotFor<Record<string, unknown>>(projector, code, "public");
+    const snapshot = result.body.snapshot;
     const payload = JSON.stringify(result.body);
 
     expect(result.status).toBe(200);
+
+    // Assert the exact shape rather than listing strings that must be absent:
+    // a substring check can only guard against leaks someone thought of, and
+    // passes trivially for any field name that was never used.
+    expect(Object.keys(snapshot).sort()).toEqual([
+      "activePoll",
+      "joinUrl",
+      "lastPick",
+      "presentCount",
+      "role",
+      "room",
+      "version",
+    ]);
+    expect(Object.keys(snapshot.room as object).sort()).toEqual([
+      "code",
+      "createdAt",
+      "endedAt",
+      "publicMode",
+      "status",
+      "title",
+    ]);
+
     expect(payload).not.toContain("Ada Lovelace");
     expect(payload).not.toContain("A private question");
-    expect(payload).not.toContain("roster");
-    expect(payload).not.toContain("pulse");
-    expect(payload).not.toContain("hostToken");
-    expect(payload).not.toContain("token_hash");
-    // No participant identifiers leak onto the shared screen.
-    expect(payload).not.toContain("participantId");
   });
 
   it("keeps the roster and other learners' data out of the learner projection", async () => {
@@ -156,7 +173,11 @@ describe("authorisation and privacy boundaries", () => {
       [learner, "learner"],
       [projector, "public"],
     ] as const) {
-      const result = await snapshotFor(client, code, role);
+      const result = await snapshotFor<{ role: string }>(client, code, role);
+      // Without this, an error body would satisfy both negative checks below
+      // and the test would pass while every surface was broken.
+      expect(result.status).toBe(200);
+      expect(result.body.snapshot.role).toBe(role);
       expect(JSON.stringify(result.body)).not.toContain(hostToken);
       expect(JSON.stringify(result.body)).not.toContain("host_token");
     }

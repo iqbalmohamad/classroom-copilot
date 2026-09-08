@@ -128,11 +128,13 @@ a second browser (or a phone on the same network) to see both sides.
 | --- | --- | --- |
 | `DATABASE_URL` | yes | Postgres connection string. |
 | `DATABASE_POOL_MAX` | no | Pooled connections per server instance. Default `5`. |
-| `NEXT_PUBLIC_APP_URL` | in production | Public origin used to build join URLs and QR codes. Without it the app trusts the forwarded host headers. |
+| `APP_ORIGIN` | in production | Public origin used to build join URLs and QR codes, e.g. `https://class.example.com`. Without it the app falls back to the request's own host headers. Deliberately **not** a `NEXT_PUBLIC_` variable: those are inlined at build time, so they cannot be changed from a hosting dashboard without rebuilding. `NEXT_PUBLIC_APP_URL` is still read as a fallback. |
+| `DATABASE_SSL` | no | `require` (the default for any non-loopback host) or `disable`. postgres.js defaults to no TLS, so this is set explicitly rather than left to a URL parameter. |
 | `AI_API_KEY` | no | Anthropic key. **Absent means AI Class Read does not exist** — the panel is not rendered and the route refuses. |
 | `AI_MODEL` | no | Defaults to `claude-haiku-4-5-20251001`. |
 | `CC_DISABLE_RATE_LIMIT` | no | Test harnesses only. Never set this on a deployment. |
 | `CC_ALLOW_INSECURE_COOKIES` | no | Drops the `Secure` cookie flag so a local `http://` run works. Set by `npm run dev` and the test harnesses. Never set it on a deployment — session cookies are Secure by default precisely so a missing `NODE_ENV` cannot silently turn that off. |
+| `CC_SKIP_BUILD` | no | Skips the rebuild the test harnesses do before running. Local iteration only. |
 
 `.env.local` is gitignored. No secret is committed, and no secret reaches the
 browser: everything above is read only in server code (`lib/env.ts` is marked
@@ -161,14 +163,24 @@ another, the app will be denied by its own backstop.
 
 1. Create a project. Note the database password.
 2. **Project Settings → Database → Connection string → Transaction pooler**.
-   Copy it, insert the password, and append `?pgbouncer=true`.
+   Copy it and insert the password. Do **not** append `?pgbouncer=true`:
+   postgres.js forwards unknown URL parameters to the server as startup
+   options, and Postgres rejects the connection outright with
+   `unrecognized configuration parameter "pgbouncer"`. The pooler is already
+   handled by the driver's `prepare: false` setting.
 3. Set that as `DATABASE_URL` and run `npm run db:migrate` from your machine.
 4. Nothing else. No tables to create by hand, no policies to write, no
    Supabase client keys to configure — the app does not use them.
 
 `prepare: false` is set on the Postgres client, so the transaction pooler is
-supported. Keep `DATABASE_POOL_MAX` small (the default of 5 is right) because
-serverless hosts run many short-lived instances.
+supported, and TLS is required for any non-loopback host. Keep
+`DATABASE_POOL_MAX` small (the default of 5 is right) because serverless hosts
+run many short-lived instances — and either set it to a number or leave the key
+out entirely, since an empty value would otherwise mean "no connections".
+
+The migration runner warns if the tables are owned by a different role than the
+one you are connected as, because that is what silently breaks the RLS backstop
+described above.
 
 ---
 
@@ -181,7 +193,7 @@ runtime will host it. Vercel is the shortest path.
 npm i -g vercel
 vercel link
 vercel env add DATABASE_URL production
-vercel env add NEXT_PUBLIC_APP_URL production     # https://<your-domain>
+vercel env add APP_ORIGIN production              # https://<your-domain>
 vercel --prod
 ```
 
@@ -203,8 +215,12 @@ Deployment notes:
   is forty concurrent invocations. That is well inside normal limits but worth
   knowing if you are watching function usage.
 - API responses are sent `no-store`; nothing classroom-related is cacheable.
-- Set `NEXT_PUBLIC_APP_URL` in production. Without it, join URLs and the QR code
-  are built from forwarded host headers.
+- Set `APP_ORIGIN` in production. Without it, join URLs and the QR code are
+  built from the request's host headers.
+- A class of forty holds forty-odd streams, each recycled roughly every fifty
+  seconds, so a ninety-minute class is on the order of 4,500 short function
+  invocations and ~60 GB-seconds on a 1 GB instance. Comfortably inside a Pro
+  plan; worth knowing before running several classes a day on Hobby.
 
 **Production URL:** _not yet deployed — see "Known limitations"._
 
@@ -213,14 +229,18 @@ Deployment notes:
 ## Testing
 
 ```bash
-npm test          # 146 tests: 67 unit + 79 integration
-npm run test:e2e  # 5 multi-browser scenarios
+npm test          # 162 tests: 70 unit + 92 integration
+npm run test:e2e  # 9 multi-browser scenarios
+npm run verify    # typecheck, then both of the above
 ```
+
+Both suites rebuild the app before running, so a green result always reflects
+the working tree rather than whatever was last compiled.
 
 **Unit** (`tests/unit/`) pins the load-bearing rules in isolation: the poll
 state machine, tally maths, pulse aggregation, picker fairness, name and code
-handling, constant-time token comparison, the rate limiter, and what the AI
-feature is allowed to send.
+handling, constant-time token comparison, the rate-limit bucket and the key it
+is derived from, and every failure path of the AI provider call.
 
 **Integration** (`tests/integration/`) runs a real Next.js server against a real
 Postgres and drives it over real HTTP with real cookies, because the behaviour
@@ -228,9 +248,12 @@ that matters only exists once those layers are in play. It covers every
 instructor route refusing a learner, one answer per learner under fifteen
 simultaneous taps, a poll closing while responses are in flight, upvote
 uniqueness under concurrent tapping, duplicate joins, cookie loss and recovery,
-cross-room token reuse, and the exact contents of each role's projection. The
-harness creates its own `_test` database and refuses to run if something else
-is already on its port.
+cross-room token reuse, presence going stale and recovering, and the exact
+shape of each role's projection. The harness creates its own `_test` database
+and refuses to run if something else is already on its port.
+`tests/integration/rate-limit.test.ts` starts a second server with limits left
+on, because every other suite disables them and an unwired limiter would
+otherwise go unnoticed.
 
 **Multi-browser** (`e2e/`) runs one instructor, three learners on phone
 viewports and a shared screen simultaneously, and asserts that state arrives on
@@ -249,8 +272,8 @@ round — no failures. A separate 150-second soak confirmed the stream-cycling
 mechanism a long class depends on: four clean cycles, zero errors, the transport
 never leaving "Live", and a poll opened at the end delivered in 331ms.
 
-Both suites need `DATABASE_URL` set. The e2e suite additionally needs a
-`<database>_e2e` database to exist and be migrated.
+Both suites need `DATABASE_URL` set; each creates and migrates its own
+database from it.
 
 ---
 
@@ -307,6 +330,10 @@ These are real and current, not hypotheticals.
   so this works, but the app has no "my classes" list — the instructor navigates
   by URL.
 - **No export.** The summary is printable; there is no CSV or JSON download.
+- **Two tabs joining at the same instant create two roster entries.** Each
+  browser gets its identity from the join response, so two simultaneous
+  cookie-less joins from the same person appear as e.g. "Sam" and "Sam (2)".
+  Cosmetic, and it cannot double-count a poll or a pulse.
 - **Chromium only in the browser suite.** Safari and Firefox have not been
   automated. The learner view was designed mobile-first and uses no
   Chromium-specific APIs, but iOS Safari has not been tested on a real device.

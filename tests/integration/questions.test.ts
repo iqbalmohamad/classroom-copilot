@@ -77,15 +77,19 @@ describe("anonymous question box", () => {
     await asker.post(`/api/rooms/${code}/questions`, { body: "Rapid tapping" });
     const [question] = await questions(instructor, code, "instructor");
 
-    await Promise.all(
+    const results = await Promise.all(
       Array.from({ length: 6 }, () =>
         voter.post(`/api/rooms/${code}/questions/${question!.id}/vote`),
       ),
     );
 
+    // Every tap must succeed — five of six failing with a 500 would otherwise
+    // satisfy a bare "the count is 0 or 1" assertion.
+    expect(results.filter((r) => r.status !== 200)).toEqual([]);
+
+    // Six serialised toggles from one learner: on, off, on, off, on, off.
     const votes = (await questions(instructor, code, "instructor"))[0]?.votes ?? -1;
-    expect(votes).toBeGreaterThanOrEqual(0);
-    expect(votes).toBeLessThanOrEqual(1);
+    expect(votes).toBe(0);
   });
 
   it("adds up votes from different learners", async () => {

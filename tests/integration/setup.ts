@@ -113,7 +113,13 @@ export default async function globalSetup() {
     );
   }
 
-  if (!existsSync(join(process.cwd(), ".next", "BUILD_ID"))) {
+  // Always build. Testing whatever happens to be in .next means a green run can
+  // reflect code that no longer exists — the same class of false confidence the
+  // port check above exists to prevent, one step earlier.
+  // CC_SKIP_BUILD=1 is for tight local iteration when nothing has changed.
+  if (process.env.CC_SKIP_BUILD !== "1") {
+    execFileSync("npm", ["run", "build"], { stdio: "inherit" });
+  } else if (!existsSync(join(process.cwd(), ".next", "BUILD_ID"))) {
     execFileSync("npm", ["run", "build"], { stdio: "inherit" });
   }
 
@@ -126,10 +132,14 @@ export default async function globalSetup() {
       ...process.env,
       DATABASE_URL: testUrl,
       NODE_ENV: "production",
-      NEXT_PUBLIC_APP_URL: BASE_URL,
       // Every request in the suite comes from one address; the per-IP limits
       // exist to stop a flood in a real class, not to throttle the tests.
       CC_DISABLE_RATE_LIMIT: "1",
+      // Pinned empty so the "AI is disabled" tests are deterministic. Without
+      // this they inherit the developer's own key from .env.local and the
+      // suite would make live, billable calls on some machines and not others.
+      AI_API_KEY: "",
+      APP_ORIGIN: BASE_URL,
       // The suites run over plain http on loopback.
       CC_ALLOW_INSECURE_COOKIES: "1",
     },
