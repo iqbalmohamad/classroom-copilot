@@ -1,7 +1,6 @@
 import "server-only";
 import { sql } from "./db";
 import type { RoomRow } from "./auth";
-import { isPresent } from "./domain/presence";
 import { summarisePulse } from "./domain/pulse";
 import { tally, tallyVisibleTo } from "./domain/polls";
 import { parsePollOptions } from "./domain/json";
@@ -62,7 +61,13 @@ interface ParticipantRosterRow {
   display_name: string;
   pulse: PulseValue | null;
   joined_at: Date;
-  last_seen_at: Date;
+  /**
+   * Computed by Postgres, not in Node. `last_seen_at` is written with the
+   * database clock, so comparing it against the application server's clock made
+   * the instructor's roster and the projector's headcount disagree whenever the
+   * two drifted — and the projector already computed presence in SQL.
+   */
+  present: boolean;
 }
 
 function header(room: RoomRow): RoomHeader {
@@ -132,11 +137,11 @@ export async function instructorSnapshot(
   room: RoomRow,
   origin: string,
 ): Promise<InstructorSnapshot> {
-  const now = new Date();
-
-  const [participants, polls, questionRows, pickRows] = await Promise.all([
+  const [participants, polls, questionRows, pickRows, pickCountRows] = await Promise.all([
     sql<ParticipantRosterRow[]>`
-      select id, display_name, pulse, joined_at, last_seen_at
+      select id, display_name, pulse, joined_at,
+             (last_seen_at > now() - make_interval(secs => ${PRESENCE_WINDOW_MS / 1000}))
+               as present
       from participants where room_id = ${room.id}
       order by joined_at asc`,
     sql<PollRow[]>`
@@ -160,11 +165,19 @@ export async function instructorSnapshot(
       left join participants p on p.id = q.participant_id
       where q.room_id = ${room.id}
       order by q.created_at desc`,
-    sql<{ id: string; display_name: string; created_at: Date; participant_id: string | null }[]>`
-      select id, display_name, created_at, participant_id
+    sql<{ id: string; display_name: string; created_at: Date }[]>`
+      select id, display_name, created_at
       from picks where room_id = ${room.id}
       order by created_at desc
       limit 100`,
+    // Counted separately, because the list above is capped for display: deriving
+    // the per-learner totals from a truncated list would quietly understate the
+    // fairness signal the instructor is reading.
+    sql<{ participant_id: string; n: string }[]>`
+      select participant_id, count(*)::text as n
+      from picks
+      where room_id = ${room.id} and participant_id is not null
+      group by participant_id`,
   ]);
 
   const activePollRow = polls.find((p) => p.status === "open") ?? null;
@@ -179,16 +192,14 @@ export async function instructorSnapshot(
       )
     : new Set<string>();
 
-  const pickCounts = new Map<string, number>();
-  for (const pick of pickRows) {
-    if (!pick.participant_id) continue;
-    pickCounts.set(pick.participant_id, (pickCounts.get(pick.participant_id) ?? 0) + 1);
-  }
+  const pickCounts = new Map<string, number>(
+    pickCountRows.map((row) => [row.participant_id, Number(row.n)]),
+  );
 
   const roster: RosterEntry[] = participants.map((p) => ({
     id: p.id,
     displayName: p.display_name,
-    present: isPresent(p.last_seen_at, now),
+    present: p.present,
     joinedAt: p.joined_at.toISOString(),
     pulse: p.pulse,
     answeredActivePoll: answered.has(p.id),
@@ -243,6 +254,9 @@ export async function learnerSnapshot(
       where room_id = ${room.id} and status in ('open', 'closed')
       order by coalesce(opened_at, created_at) desc
       limit 1`,
+    // One grouped pass rather than three correlated subqueries per row. This
+    // runs for every learner on every version bump, so with forty phones and a
+    // busy queue the correlated form was the most expensive query in the app.
     sql<
       {
         id: string;
@@ -254,15 +268,19 @@ export async function learnerSnapshot(
       }[]
     >`
       select q.id, q.body, q.status, q.created_at,
-             (select count(*) from question_votes v where v.question_id = q.id)::text as votes,
-             exists (
-               select 1 from question_votes v
-               where v.question_id = q.id and v.participant_id = ${participantId}
-             ) as voted
+             coalesce(v.total, 0)::text as votes,
+             coalesce(v.mine, false) as voted
       from questions q
+      left join (
+        select question_id,
+               count(*) as total,
+               bool_or(participant_id = ${participantId}) as mine
+        from question_votes
+        where room_id = ${room.id}
+        group by question_id
+      ) v on v.question_id = q.id
       where q.room_id = ${room.id} and q.status <> 'hidden'
-      order by (select count(*) from question_votes v where v.question_id = q.id) desc,
-               q.created_at desc
+      order by coalesce(v.total, 0) desc, q.created_at desc
       limit 60`,
     sql<{ participant_id: string | null }[]>`
       select participant_id from picks where room_id = ${room.id}

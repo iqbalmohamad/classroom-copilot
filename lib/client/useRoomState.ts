@@ -40,8 +40,13 @@ export interface RoomState<R extends Role> {
   refresh: () => void;
 }
 
-/** No stream traffic for this long means the stream is no longer trustworthy. */
-const STREAM_SILENCE_MS = 25_000;
+/**
+ * No stream traffic for this long means the stream is no longer trustworthy.
+ * The server pings every 10s, so this tolerates two missed pings plus slack —
+ * one slow iteration on a loaded server must not make forty clients abandon a
+ * perfectly healthy stream at once.
+ */
+const STREAM_SILENCE_MS = 35_000;
 const POLL_INTERVAL_MS = 1_500;
 /** How often to retry the stream once we have fallen back to polling. */
 const STREAM_RETRY_MS = 20_000;
@@ -87,11 +92,21 @@ export function useRoomState<R extends Role>(code: string, role: R): RoomState<R
         deniedRef.current = false;
         applySnapshot(result.snapshot);
         lastMessageRef.current = Date.now();
+        // A successful read proves the transport works. Without this, a
+        // two-second network blip while polling leaves the badge showing
+        // "Offline" for the rest of the class.
+        setConnection((current) =>
+          current === "live" ? current : pollingRef.current ? "polling" : "connecting",
+        );
         return true;
       } catch (err) {
         if ((err as Error)?.name === "AbortError") return false;
         if (err instanceof ApiRequestError) {
           if (err.status === 401 || err.status === 403 || err.status === 404) {
+            // Latch, but never permanently: a captive portal, a proxy
+            // interstitial or a single dropped cookie must not end a learner's
+            // class. Foregrounding the tab or coming back online clears this
+            // and tries again (see resync).
             deniedRef.current = true;
             setConnection("denied");
             setError(err.message);
@@ -141,10 +156,22 @@ export function useRoomState<R extends Role>(code: string, role: R): RoomState<R
         void fetchOnce(controller.signal);
       }, POLL_INTERVAL_MS);
 
-      // Keep trying to get the cheaper, lower-latency transport back.
+      armStreamRetry();
+    };
+
+    /**
+     * Keep trying to get the cheaper, lower-latency transport back.
+     *
+     * This re-arms itself on every attempt. Arming it only when polling starts
+     * meant a single failed retry left the client polling for the rest of the
+     * class, because startPolling early-returns once polling is already running.
+     */
+    const armStreamRetry = () => {
       if (retryTimer) clearTimeout(retryTimer);
       retryTimer = setTimeout(() => {
-        if (!stoppedRef.current && !deniedRef.current) openStream();
+        if (stoppedRef.current || deniedRef.current) return;
+        if (pollingRef.current) armStreamRetry();
+        openStream();
       }, STREAM_RETRY_MS);
     };
 
@@ -166,6 +193,10 @@ export function useRoomState<R extends Role>(code: string, role: R): RoomState<R
 
       source.addEventListener("state", (event) => {
         lastMessageRef.current = Date.now();
+        // A frame arrived, so the reconnect worked: close the grace window that
+        // suppresses the polling fallback, or a stream that starts failing just
+        // after a cycle would reconnect in a tight loop instead of falling back.
+        cyclingUntilRef.current = 0;
         stopPolling();
         if (retryTimer) clearTimeout(retryTimer);
         setConnection("live");
@@ -197,8 +228,10 @@ export function useRoomState<R extends Role>(code: string, role: R): RoomState<R
         closeStream();
         if (stoppedRef.current) return;
 
-        // An expected end-of-cycle close is not a failure.
+        // An expected end-of-cycle close is not a failure. Consume the window
+        // so a second failure inside it takes the normal fallback path.
         if (Date.now() < cyclingUntilRef.current) {
+          cyclingUntilRef.current = 0;
           openStream();
           return;
         }
@@ -212,11 +245,30 @@ export function useRoomState<R extends Role>(code: string, role: R): RoomState<R
       };
     };
 
+    /**
+     * Bring everything back after the tab was hidden or the device was offline.
+     *
+     * Two subtleties, both of which stranded a waking phone before:
+     *   * a stream can be dead while `sourceRef` is still set — iOS tears the
+     *     socket down without delivering an error to a frozen page — so the
+     *     readyState is what decides, not nullness;
+     *   * the silence clock is only reset once a fetch has actually succeeded.
+     *     Resetting it up front told the watchdog a dead stream was healthy.
+     */
     const resync = () => {
-      if (stoppedRef.current || deniedRef.current) return;
-      lastMessageRef.current = Date.now();
-      void fetchOnce(controller.signal);
-      if (!sourceRef.current) openStream();
+      if (stoppedRef.current) return;
+
+      // A refusal is worth re-testing on the way back: the cause is usually a
+      // captive portal or a proxy that has since gone away.
+      deniedRef.current = false;
+
+      void fetchOnce(controller.signal).then((okay) => {
+        if (stoppedRef.current || !okay) return;
+        lastMessageRef.current = Date.now();
+      });
+
+      const source = sourceRef.current;
+      if (!source || source.readyState === EventSource.CLOSED) openStream();
     };
 
     refreshRef.current = () => {

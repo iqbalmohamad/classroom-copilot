@@ -28,6 +28,19 @@ async function logEvent(tx: Db, roomId: string, kind: string, payload: object = 
            values (${roomId}, ${kind}, ${sql.json(payload as never)})`;
 }
 
+/**
+ * Serialise writes that allocate something room-scoped.
+ *
+ * `polls.seq` is computed with max(seq)+1 and "one open poll per room" is a
+ * partial unique index — under READ COMMITTED neither is safe against two
+ * overlapping transactions, and an instructor double-clicking Open is not an
+ * exotic case. A transaction-scoped advisory lock costs microseconds and turns
+ * both races into a queue.
+ */
+async function lockRoom(tx: Tx, roomId: string): Promise<void> {
+  await tx`select pg_advisory_xact_lock(hashtextextended(${roomId}, 0))`;
+}
+
 function assertRoomOpen(room: RoomRow) {
   if (room.status !== "open") {
     throw new ApiError("gone", "This class session has ended.");
@@ -66,8 +79,14 @@ export async function createRoom(title: string | undefined): Promise<{
 }
 
 export async function endRoom(room: RoomRow): Promise<void> {
-  await sql`update rooms set status = 'ended', ended_at = now() where id = ${room.id}`;
-  await logEvent(sql, room.id, "room_ended");
+  await sql.begin(async (tx) => {
+    // Close any poll still collecting. Besides being the right end state, this
+    // is what stops an answer that was already in flight from landing in a room
+    // that has just ended: respondToPoll re-checks the poll status under a lock.
+    await closeOpenPolls(tx, room.id);
+    await tx`update rooms set status = 'ended', ended_at = now() where id = ${room.id}`;
+    await logEvent(tx, room.id, "room_ended");
+  });
 }
 
 export async function setPublicMode(room: RoomRow, mode: PublicMode): Promise<void> {
@@ -106,7 +125,7 @@ export async function joinRoom(
   return sql.begin(async (tx) => {
     // Serialise joins for this room so two learners typing the same name at the
     // same moment still get distinguishable roster entries.
-    await tx`select pg_advisory_xact_lock(hashtextextended(${room.id}, 0))`;
+    await lockRoom(tx, room.id);
 
     if (existingToken) {
       const hash = hashToken(existingToken);
@@ -179,6 +198,8 @@ export async function createPoll(room: RoomRow, input: CreatePollInput): Promise
   const options = buildOptions(input.kind, input.choiceLabels);
 
   return sql.begin(async (tx) => {
+    await lockRoom(tx, room.id);
+
     const seqRows = await tx<{ next: number }[]>`
       select coalesce(max(seq), 0) + 1 as next from polls where room_id = ${room.id}`;
     const seq = seqRows[0]?.next ?? 1;
@@ -214,6 +235,8 @@ export async function actOnPoll(
   assertRoomOpen(room);
 
   await sql.begin(async (tx) => {
+    await lockRoom(tx, room.id);
+
     const rows = await tx<{ status: "draft" | "open" | "closed"; revealed: boolean }[]>`
       select status, revealed from polls
       where id = ${pollId} and room_id = ${room.id}
@@ -234,7 +257,13 @@ export async function actOnPoll(
       set status = ${result.next.status},
           revealed = ${result.next.revealed},
           opened_at = case when ${action === "open"} then now() else opened_at end,
-          closed_at = case when ${action === "close"} then now() else closed_at end
+          -- Reopening clears the old close time; existing answers are kept on
+          -- purpose, since it is the same question being put to the room again.
+          closed_at = case
+                        when ${action === "close"} then now()
+                        when ${action === "open"} then null
+                        else closed_at
+                      end
       where id = ${pollId}`;
 
     // Keep the projector in step with the instructor's most recent intent.
@@ -330,6 +359,14 @@ export async function toggleQuestionVote(
   assertRoomOpen(room);
 
   return sql.begin(async (tx) => {
+    // The primary key already makes it impossible to inflate the count, but the
+    // toggle is a read-modify-write: without this lock a retried or double tap
+    // can interleave delete-then-insert and leave the learner voted when they
+    // meant to un-vote. The lock is per (question, learner), so it never
+    // contends between different learners.
+    await tx`select pg_advisory_xact_lock(
+      hashtextextended(${`${questionId}:${participantId}`}, 0))`;
+
     const exists = await tx<{ id: string }[]>`
       select id from questions
       where id = ${questionId} and room_id = ${room.id} and status <> 'hidden'`;
@@ -343,8 +380,7 @@ export async function toggleQuestionVote(
 
     await tx`
       insert into question_votes (question_id, participant_id, room_id)
-      values (${questionId}, ${participantId}, ${room.id})
-      on conflict do nothing`;
+      values (${questionId}, ${participantId}, ${room.id})`;
     return { voted: true };
   });
 }

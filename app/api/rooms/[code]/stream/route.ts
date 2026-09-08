@@ -11,7 +11,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const POLL_INTERVAL_MS = 400;
-const HEARTBEAT_MS = 15_000;
+/** Comfortably inside the client's 35s silence budget, even if a tick is slow. */
+const HEARTBEAT_MS = 10_000;
 /** Re-emit even without a version change so derived data (presence) stays fresh. */
 const REFRESH_MS = 10_000;
 const MAX_LIFETIME_MS = 50_000;
@@ -36,8 +37,14 @@ export async function GET(req: Request, ctx: { params: Promise<{ code: string }>
   let room: RoomRow;
   try {
     room = await loadRoom(code);
-  } catch {
-    return fail("not_found", "That class code was not found.");
+  } catch (error) {
+    // Only a genuinely missing room is a 404. Reporting a pool timeout as
+    // "class not found" would send an instructor hunting for a typo in a code
+    // that is perfectly correct.
+    if ((error as { code?: string }).code === "not_found") {
+      return fail("not_found", "That class code was not found.");
+    }
+    return fail("unavailable", "Could not reach the class right now. Retrying.");
   }
 
   // Authorise once, up front: a rejected stream must fail loudly rather than

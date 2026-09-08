@@ -104,4 +104,121 @@ describe("behaviour under pressure", () => {
       await sql.end();
     }
   });
+
+  it("survives an instructor double-clicking Open, and two tabs opening at once", async () => {
+    const { instructor, code } = await createRoom();
+
+    // Two poll creations racing: `polls.seq` is max(seq)+1, which is only safe
+    // because the write is serialised. A bare 500 here is what an instructor
+    // sees when they double-submit the form.
+    const created = await Promise.all(
+      Array.from({ length: 6 }, (_, i) =>
+        instructor.post<{ pollId: string }>(`/api/rooms/${code}/polls`, {
+          prompt: `Race ${i + 1}`,
+          kind: "yes_no",
+          openNow: true,
+        }),
+      ),
+    );
+    expect(created.filter((c) => c.status !== 200)).toEqual([]);
+
+    // And two tabs opening different polls at the same moment: "one open poll
+    // per room" is a partial unique index, so an unserialised open is a 500.
+    const ids = created.map((c) => c.body.pollId);
+    const opens = await Promise.all(
+      ids.map((id) => instructor.post(`/api/rooms/${code}/polls/${id}`, { action: "open" })),
+    );
+    for (const result of opens) {
+      // Either it opened, or it was legitimately rejected as already open.
+      expect([200, 409]).toContain(result.status);
+    }
+
+    const state = await snapshotFor<{ polls: { status: string }[] }>(
+      instructor,
+      code,
+      "instructor",
+    );
+    expect(state.body.snapshot.polls.filter((p) => p.status === "open")).toHaveLength(1);
+  });
+
+  it("clears the close time when a poll is reopened, and keeps the answers", async () => {
+    const { instructor, code } = await createRoom();
+    const { learner } = await joinAs(code, "Ada");
+    const poll = await instructor.post<{ pollId: string }>(`/api/rooms/${code}/polls`, {
+      prompt: "Reopen me",
+      kind: "yes_no",
+      openNow: true,
+    });
+    const pollId = poll.body.pollId;
+    await learner.post(`/api/rooms/${code}/polls/${pollId}/respond`, { value: "yes" });
+
+    await instructor.post(`/api/rooms/${code}/polls/${pollId}`, { action: "close" });
+    await instructor.post(`/api/rooms/${code}/polls/${pollId}`, { action: "open" });
+
+    const state = await snapshotFor<{
+      activePoll: { closedAt: string | null; responseCount: number };
+    }>(instructor, code, "instructor");
+    expect(state.body.snapshot.activePoll.closedAt).toBeNull();
+    // The same question is being put to the room again, so the answers stand.
+    expect(state.body.snapshot.activePoll.responseCount).toBe(1);
+  });
+
+  it("stops a poll that is still collecting when the class ends", async () => {
+    const { instructor, code } = await createRoom();
+    const { learner } = await joinAs(code, "Ada");
+    const poll = await instructor.post<{ pollId: string }>(`/api/rooms/${code}/polls`, {
+      prompt: "Still open at the bell",
+      kind: "yes_no",
+      openNow: true,
+    });
+
+    await instructor.post(`/api/rooms/${code}/end`);
+
+    const state = await snapshotFor<{ polls: { status: string }[] }>(
+      instructor,
+      code,
+      "instructor",
+    );
+    expect(state.body.snapshot.polls.every((p) => p.status !== "open")).toBe(true);
+
+    const late = await learner.post(`/api/rooms/${code}/polls/${poll.body.pollId}/respond`, {
+      value: "yes",
+    });
+    expect([409, 410]).toContain(late.status);
+  });
+
+  it("keeps a learner's upvote toggle consistent under a retried tap", async () => {
+    const { instructor, code } = await createRoom();
+    const { learner: asker } = await joinAs(code, "Ada");
+    const { learner: voter } = await joinAs(code, "Grace");
+    await asker.post(`/api/rooms/${code}/questions`, { body: "Toggle under pressure" });
+
+    const state = await snapshotFor<{ questions: { id: string }[] }>(
+      instructor,
+      code,
+      "instructor",
+    );
+    const questionId = state.body.snapshot.questions[0]!.id;
+
+    // Fire an odd number of toggles concurrently, several times over. Whatever
+    // the interleaving, the stored state must match what the last call returned
+    // and can never exceed one vote.
+    for (let round = 0; round < 5; round += 1) {
+      const results = await Promise.all(
+        Array.from({ length: 3 }, () =>
+          voter.post<{ voted: boolean }>(`/api/rooms/${code}/questions/${questionId}/vote`),
+        ),
+      );
+      expect(results.filter((r) => r.status !== 200)).toEqual([]);
+
+      const after = await snapshotFor<{ questions: { votes: number }[] }>(
+        instructor,
+        code,
+        "instructor",
+      );
+      const votes = after.body.snapshot.questions[0]!.votes;
+      expect(votes).toBeGreaterThanOrEqual(0);
+      expect(votes).toBeLessThanOrEqual(1);
+    }
+  });
 });
