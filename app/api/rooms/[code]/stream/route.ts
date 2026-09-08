@@ -60,7 +60,11 @@ export async function GET(req: Request, ctx: { params: Promise<{ code: string }>
     async start(controller) {
       let closed = false;
       let lastPayload = "";
-      let lastEmit = 0;
+      // When we last *built* a snapshot, which is the expensive part. This is
+      // deliberately not "when we last sent one": an unchanged room emits
+      // nothing, and keying the refresh off emission would rebuild the
+      // snapshot on every tick of a quiet room, for every connected client.
+      let lastBuild = 0;
       let lastHeartbeatSent = Date.now();
       let lastPresenceTouch = Date.now();
 
@@ -71,9 +75,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ code: string }>
 
       const emit = (snapshot: unknown) => {
         const payload = JSON.stringify(snapshot);
-        if (payload === lastPayload) return;
+        if (payload === lastPayload) return; // nothing the client does not have
         lastPayload = payload;
-        lastEmit = Date.now();
         send("state", payload);
       };
 
@@ -91,6 +94,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ code: string }>
 
       // Tell the browser how quickly to come back after we close.
       controller.enqueue(encoder.encode("retry: 1000\n\n"));
+      lastBuild = Date.now();
       emit(first);
 
       try {
@@ -114,9 +118,12 @@ export async function GET(req: Request, ctx: { params: Promise<{ code: string }>
           if (!fresh) break;
 
           const changed = Number(fresh.version) !== Number(room.version);
-          const stale = Date.now() - lastEmit > REFRESH_MS;
+          // Rebuild periodically even without a version change, so data derived
+          // at read time (presence) does not go stale on an idle room.
+          const stale = Date.now() - lastBuild > REFRESH_MS;
 
           if (changed || stale) {
+            lastBuild = Date.now();
             room = fresh;
             try {
               emit(await buildSnapshot(req, fresh, role as Role));

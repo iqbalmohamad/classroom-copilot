@@ -279,13 +279,19 @@ export async function respondToPoll(
       throw new ApiError("bad_request", "That is not one of the available answers.");
     }
 
+    // Lock order matters. Writing the response touches `rooms` (via the version
+    // trigger), so the participant row must be taken BEFORE that, not after:
+    // setPulse and clearPulses both go participants -> rooms, and the reverse
+    // order here would let a learner answering a poll deadlock against the same
+    // learner changing their pulse a moment later.
+    await tx`update participants set last_seen_at = now() where id = ${participantId}`;
+
     await tx`
       insert into poll_responses (poll_id, participant_id, room_id, value)
       values (${pollId}, ${participantId}, ${room.id}, ${value})
       on conflict (poll_id, participant_id)
       do update set value = excluded.value, updated_at = now()`;
 
-    await tx`update participants set last_seen_at = now() where id = ${participantId}`;
     return { value };
   });
 }
