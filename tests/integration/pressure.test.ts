@@ -274,7 +274,7 @@ describe("behaviour under pressure", () => {
     expect(shown.body.snapshot.activePoll.tallies).toBeNull();
   });
 
-  it("putting the screen on Results actually reveals them", async () => {
+  it("putting the screen on Results does not reveal them", async () => {
     const { instructor, code } = await createRoom();
     const { learner } = await joinAs(code, "Ada");
     const poll = await instructor.post<{ pollId: string }>(`/api/rooms/${code}/polls`, {
@@ -284,9 +284,11 @@ describe("behaviour under pressure", () => {
     });
     await learner.post(`/api/rooms/${code}/polls/${poll.body.pollId}/respond`, { value: "yes" });
 
-    // Selecting Results without revealing used to leave the room looking at
-    // "Results coming up…" while the instructor talked through numbers nobody
-    // could see.
+    // Choosing a screen is a display decision. Revealing is a separate one, and
+    // making the first perform the second means an instructor exploring the
+    // screen options publishes the split to the class by accident. The room
+    // keeps the question up; the console tells the instructor that is what it
+    // is doing, so nobody talks through numbers the class cannot see.
     await instructor.post(`/api/rooms/${code}/public-mode`, { mode: "results" });
 
     const projector = new Client("projector");
@@ -295,7 +297,16 @@ describe("behaviour under pressure", () => {
       code,
       "public",
     );
-    expect(shown.body.snapshot.activePoll.tallies).not.toBeNull();
+    expect(shown.body.snapshot.activePoll.tallies).toBeNull();
+
+    // The reveal control is still the one thing that puts them up.
+    await instructor.post(`/api/rooms/${code}/polls/${poll.body.pollId}`, { action: "reveal" });
+    const revealed = await snapshotFor<{ activePoll: { tallies: unknown[] | null } }>(
+      new Client("projector-after"),
+      code,
+      "public",
+    );
+    expect(revealed.body.snapshot.activePoll.tallies).not.toBeNull();
   });
 
   it("puts every screen state on the projector on request", async () => {

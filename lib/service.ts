@@ -89,23 +89,20 @@ export async function endRoom(room: RoomRow): Promise<void> {
   });
 }
 
+/**
+ * Point the presentation screen at something.
+ *
+ * Choosing a screen is a display decision and nothing more. In particular
+ * choosing the results screen does not reveal results: revealing is the
+ * instructor's separate, deliberate act, and one control quietly performing the
+ * other is how a distribution ends up in front of a class that was not meant to
+ * see it yet. When results are not revealed the screen keeps the question up,
+ * and the console says so rather than leaving the instructor to discover it by
+ * turning round.
+ */
 export async function setPublicMode(room: RoomRow, mode: PublicMode): Promise<void> {
   await sql.begin(async (tx) => {
     await tx`update rooms set public_mode = ${mode} where id = ${room.id}`;
-
-    // "Show results on the screen" has to actually show them. Without this the
-    // instructor selects Results, turns to the class, and talks through numbers
-    // the room is not being shown.
-    if (mode === "results") {
-      await tx`
-        update polls set revealed = true
-        where id = (
-          select id from polls
-          where room_id = ${room.id} and status in ('open', 'closed')
-          order by coalesce(opened_at, created_at) desc
-          limit 1
-        )`;
-    }
   });
 }
 
