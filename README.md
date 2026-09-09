@@ -200,9 +200,13 @@ described above.
 ## Deployment — Cloudflare Workers
 
 The app runs on Cloudflare Workers through the OpenNext adapter
-(`@opennextjs/cloudflare`). Everything below has been exercised against the real
-Workers runtime (`workerd`) locally; what has *not* happened yet is a deploy to
-Cloudflare itself, because this repository has no Cloudflare credentials.
+(`@opennextjs/cloudflare`), deployed at
+<https://classroom-copilot.mohammad-iqbal1304.workers.dev>.
+
+Everything below has also been exercised against the real Workers runtime
+(`workerd`) locally. The deploy itself is run by the Product Owner from their
+own machine: this repository has no Cloudflare credentials, and the live
+Hyperdrive id and `APP_ORIGIN` live in their working copy rather than here.
 
 ```bash
 npm run cf:build     # build the Worker bundle into .open-next/
@@ -348,10 +352,12 @@ more so join URLs and the QR code are built from it rather than from request
 headers.
 
 **What is and is not verified on Windows.** Every command above is Node or
-PowerShell only — no Unix shell, no inline `VAR=value` prefixes, and the
-pre-deployment check runs wrangler through `node node_modules/wrangler/bin/wrangler.js`
-rather than `npx`, which fails with `ENOENT` on Windows because `npx` is
-`npx.cmd`. That said, none of it has been *run* on a Windows machine from here;
+PowerShell only — no Unix shell, no inline `VAR=value` prefixes. Where this
+repository has to start another tool it runs that package's own entry point
+with the current Node binary (`node node_modules/<pkg>/…`) rather than `npm` or
+`npx`, which are `.cmd` shims on Windows and fail with `ENOENT` under
+`execFile`: that covers the pre-deployment check, `npm run dev`, and both test
+harnesses. That said, none of it has been *run* on a Windows machine from here;
 the verification in this repository was done on Linux with Node 22.
 
 If any step above misbehaves on Windows, use the path that was actually
@@ -434,7 +440,10 @@ are exactly what they cannot cover.
 
 Item 9 is the one no amount of local testing substitutes for.
 
-**Production URL:** _not yet deployed — see "Known limitations"._
+**Production URL:** <https://classroom-copilot.mohammad-iqbal1304.workers.dev>
+
+The deployed build is the one the Product Owner last pushed; a revision in this
+repository is not live until they deploy it.
 
 ---
 
@@ -564,13 +573,12 @@ These are real and current, not hypotheticals.
   TLS termination to Supabase, real origin pooling and real network latency are
   still unverified. That is the largest remaining unknown, and the first thing
   to check after the first deploy.
-- **No production deployment yet.** The app is verified against the real
-  Cloudflare Workers runtime locally — the full suite plus a class-scale load
-  test and a stream-cycling soak all run on `workerd` — but no hosted instance
-  exists. This environment has no Cloudflare credentials and cannot reach
-  `api.cloudflare.com`, so the deploy itself has to be run by someone who can.
-  The steps are in Deployment above and `npm run cf:check` verifies the
-  configuration before you try.
+- **Deploys are not run from here.** A hosted instance exists and the Product
+  Owner has used it. This environment has no Cloudflare credentials and cannot
+  reach `api.cloudflare.com`, so every deploy — including of any revision on
+  this branch — is run from their machine, and nothing in this repository has
+  been observed running on Cloudflare itself. The steps are in Deployment above
+  and `npm run cf:check` verifies the configuration before you try.
 - **Workers Paid ($5/month) is required.** The Free plan's 50 subrequests per
   invocation and Hyperdrive's 100k queries/day both break under a single class;
   the reasoning and numbers are under Deployment.
