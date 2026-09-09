@@ -5,6 +5,9 @@ import { api, ApiRequestError } from "@/lib/client/api";
 import { learnerToken, rememberedName } from "@/lib/client/tokens";
 import { useRoomState } from "@/lib/client/useRoomState";
 import { ConnectionBadge } from "@/components/ConnectionBadge";
+import { TimerChip } from "@/components/TimerChip";
+import { ActivityCard } from "@/components/learner/ActivityCard";
+import { MaterialsCard } from "@/components/learner/MaterialsCard";
 import {
   PULSE_LABELS,
   PULSE_VALUES,
@@ -175,11 +178,17 @@ function LearnerRoom({ code, onLeave }: { code: string; onLeave: () => void }) {
   return (
     <main className="learner-shell stack">
       <header className="row-between">
-        <div className="stack-sm" style={{ gap: 2 }}>
-          <span className="tiny muted">{snapshot.room.title}</span>
+        <div className="stack-sm" style={{ gap: 2, minWidth: 0 }}>
+          <span className="tiny muted">
+            {snapshot.room.title}
+            {snapshot.room.currentSectionTitle ? ` · ${snapshot.room.currentSectionTitle}` : ""}
+          </span>
           <strong>{snapshot.me.displayName}</strong>
         </div>
-        <ConnectionBadge connection={connection} />
+        <div className="row" style={{ gap: 8 }}>
+          {snapshot.timer ? <TimerChip timer={snapshot.timer} /> : null}
+          <ConnectionBadge connection={connection} />
+        </div>
       </header>
 
       {ended ? (
@@ -200,6 +209,18 @@ function LearnerRoom({ code, onLeave }: { code: string; onLeave: () => void }) {
         </div>
       ) : null}
 
+      {snapshot.activities.map((activity) => (
+        <ActivityCard
+          key={activity.id}
+          code={code}
+          activity={activity}
+          submission={snapshot.mySubmissions.find((entry) => entry.activityId === activity.id)}
+          disabled={ended}
+          onError={flash}
+          onDone={refresh}
+        />
+      ))}
+
       <PollCard
         code={code}
         snapshot={snapshot}
@@ -211,6 +232,7 @@ function LearnerRoom({ code, onLeave }: { code: string; onLeave: () => void }) {
       <PulseCard
         code={code}
         current={snapshot.me.pulse}
+        roundId={snapshot.pulseRound?.id ?? null}
         disabled={ended}
         onError={flash}
         onDone={refresh}
@@ -219,9 +241,17 @@ function LearnerRoom({ code, onLeave }: { code: string; onLeave: () => void }) {
       <QuestionsCard
         code={code}
         questions={snapshot.questions}
+        sectionId={snapshot.room.currentSectionId}
+        sectionTitle={snapshot.room.currentSectionTitle}
+        activity={snapshot.activities.find((entry) => entry.status === "open") ?? null}
         disabled={ended}
         onError={flash}
         onDone={refresh}
+      />
+
+      <MaterialsCard
+        materials={snapshot.materials}
+        currentSectionId={snapshot.room.currentSectionId}
       />
     </main>
   );
@@ -362,12 +392,15 @@ function PollCard({
 function PulseCard({
   code,
   current,
+  roundId,
   disabled,
   onError,
   onDone,
 }: {
   code: string;
   current: PulseValue | null;
+  /** Which round this phone believes is collecting. */
+  roundId: string | null;
   disabled: boolean;
   onError: (message: string) => void;
   onDone: () => void;
@@ -378,9 +411,11 @@ function PulseCard({
     if (disabled || busy) return;
     setBusy(true);
     try {
+      // Sending the round back is what stops a tap that was already in flight
+      // from being counted against a question the class has not been asked yet.
       await api(`/api/rooms/${code}/pulse`, {
         method: "POST",
-        body: { pulse },
+        body: { pulse, roundId },
         code,
         role: "learner",
       });
@@ -426,12 +461,18 @@ function PulseCard({
 function QuestionsCard({
   code,
   questions,
+  sectionId,
+  sectionTitle,
+  activity,
   disabled,
   onError,
   onDone,
 }: {
   code: string;
   questions: LearnerSnapshot["questions"];
+  sectionId: string | null;
+  sectionTitle: string | null;
+  activity: LearnerSnapshot["activities"][number] | null;
   disabled: boolean;
   onError: (message: string) => void;
   onDone: () => void;
@@ -440,15 +481,24 @@ function QuestionsCard({
   const [anonymous, setAnonymous] = useState(true);
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
+  /** "here" = this section (or the open activity); "general" = about anything. */
+  const [about, setAbout] = useState<"here" | "general">("here");
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (busy || body.trim().length < 2) return;
     setBusy(true);
     try {
+      // The context is captured at submission time and never rewritten, so
+      // moving the class on does not relabel what was asked here.
       await api(`/api/rooms/${code}/questions`, {
         method: "POST",
-        body: { body, anonymous },
+        body: {
+          body,
+          anonymous,
+          sectionId: about === "here" ? sectionId : null,
+          activityId: about === "here" ? activity?.id ?? null : null,
+        },
         code,
         role: "learner",
       });
@@ -495,6 +545,26 @@ function QuestionsCard({
           onChange={(event) => setBody(event.target.value)}
           aria-label="Your question"
         />
+        {sectionId || activity ? (
+          <div className="btn-group">
+            <button
+              type="button"
+              className={`btn ${about === "here" ? "btn-primary" : ""}`}
+              aria-pressed={about === "here"}
+              onClick={() => setAbout("here")}
+            >
+              About {activity ? activity.title.slice(0, 28) : (sectionTitle ?? "this section")}
+            </button>
+            <button
+              type="button"
+              className={`btn ${about === "general" ? "btn-primary" : ""}`}
+              aria-pressed={about === "general"}
+              onClick={() => setAbout("general")}
+            >
+              General question
+            </button>
+          </div>
+        ) : null}
         <label className="checkbox">
           <input
             type="checkbox"

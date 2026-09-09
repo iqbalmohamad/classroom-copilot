@@ -508,6 +508,137 @@ select {
   color: #0b5c42;
 }
 
+/* ------------------------------------------- sections, activities, timers */
+
+.section-bar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+}
+
+.section-bar-title {
+  font-size: 17px;
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * The countdown reads from across a room, so it is a chip rather than body
+ * text, and the digits are tabular: a timer whose width jumps every second is
+ * the kind of movement a class watches instead of the lesson.
+ */
+.timer-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-soft);
+  white-space: nowrap;
+}
+
+.timer-chip-label {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.timer-chip-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.timer-chip-urgent {
+  border-color: #eebcbb;
+  background: var(--bad-soft);
+  color: #7d1c20;
+}
+
+.timer-chip-lg {
+  padding: 8px 16px;
+}
+
+.timer-chip-lg .timer-chip-value {
+  font-size: clamp(20px, 3vw, 34px);
+}
+
+.activity-row {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.response-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/*
+ * Pasted SQL has to survive being read back: indentation is meaningful, and a
+ * long line must scroll inside its own box rather than widening the page on a
+ * phone.
+ */
+.answer-pre,
+.textarea-code {
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+
+.answer-pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  overflow-x: auto;
+}
+
+.textarea-code {
+  min-height: 120px;
+}
+
+.material-link {
+  font-weight: 600;
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
+.public-section {
+  color: var(--ink-muted);
+  font-weight: 500;
+}
+
+.public-field-label {
+  font-size: clamp(14px, 1.6vw, 20px);
+  color: var(--ink-muted);
+  margin: 12px 0 4px;
+}
+
+.public-pre {
+  font-family: var(--mono);
+  font-size: clamp(14px, 1.8vw, 24px);
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin: 0;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
 /* -------------------------------------------- presentation screen panel */
 
 .subhead {

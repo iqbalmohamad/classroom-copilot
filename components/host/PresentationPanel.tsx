@@ -25,6 +25,8 @@ export function PresentationPanel({
   publicMode,
   polls,
   hasPick,
+  hasActivity,
+  hasRevealedResponse,
   ended,
   disabled,
   act,
@@ -33,6 +35,8 @@ export function PresentationPanel({
   publicMode: PublicMode;
   polls: PollView[];
   hasPick: boolean;
+  hasActivity: boolean;
+  hasRevealedResponse: boolean;
   ended: boolean;
   disabled: boolean;
   act: HostAction;
@@ -40,7 +44,7 @@ export function PresentationPanel({
   const [showPicker, setShowPicker] = useState(false);
   const hintId = useId();
 
-  const context = { polls, hasPick, ended };
+  const context = { polls, hasPick, ended, hasActivity, hasRevealedResponse };
   const showing = describeScreen(publicMode, context);
 
   return (

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api, ApiRequestError } from "@/lib/client/api";
 import { normalizeRoomCode } from "@/lib/room-code";
+import { planKeys, type StoredPlan } from "@/lib/client/tokens";
 
 /**
  * The one page both roles land on: start a class, or join one.
@@ -19,11 +20,16 @@ export function HomeScreen() {
   const [code, setCode] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [plan, setPlan] = useState<StoredPlan | null>(null);
 
   useEffect(() => {
     if (params.get("error") === "bad-host-link") {
       setError("That instructor link is not valid for a class we can find. Start a new one.");
     }
+    // Only the plan id travels in the URL; its token stays in this browser, so
+    // a link cannot hand someone else a plan they were never given.
+    const requested = params.get("plan");
+    if (requested) setPlan(planKeys.find(requested));
   }, [params]);
 
   async function createClass() {
@@ -32,7 +38,10 @@ export function HomeScreen() {
     try {
       const result = await api<{ code: string }>("/api/rooms", {
         method: "POST",
-        body: { title: title.trim() || undefined },
+        body: {
+          title: title.trim() || undefined,
+          ...(plan ? { planId: plan.id, planToken: plan.token } : {}),
+        },
       });
       // The instructor credential stays in its httpOnly cookie. Recovery, if
       // this browser ever loses it, is the instructor link inside the console.
@@ -65,6 +74,13 @@ export function HomeScreen() {
       {error ? (
         <div className="notice notice-error" style={{ marginBottom: 16 }} role="alert">
           {error}
+        </div>
+      ) : null}
+
+      {plan ? (
+        <div className="notice notice-ok" style={{ marginBottom: 16 }} role="status">
+          Starting from your saved plan <strong>{plan.title}</strong>. Sections, exercises, polls and
+          materials come across as drafts; nothing from the previous class does.
         </div>
       ) : null}
 

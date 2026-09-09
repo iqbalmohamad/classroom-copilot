@@ -32,7 +32,7 @@ const REQUEST_TIMEOUT_MS = 12_000;
 export async function api<T>(
   path: string,
   options: {
-    method?: "GET" | "POST" | "DELETE";
+    method?: "GET" | "POST" | "PATCH" | "DELETE";
     body?: unknown;
     code?: string;
     role?: Role;

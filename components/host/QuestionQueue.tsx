@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { QuestionView } from "@/lib/types";
+import type { QuestionView, SectionView } from "@/lib/types";
 import type { HostAction } from "./types";
 
 /**
@@ -11,29 +11,43 @@ import type { HostAction } from "./types";
  * top. "Answered" moves a question out of the way; "Hide" exists because a live
  * class occasionally needs an anonymous message removed from every learner's
  * screen immediately, and there is no other way to do that.
+ *
+ * Each question carries the section it was asked in, captured when it was
+ * asked. Filtering by that is how "which bit were they stuck on" survives the
+ * rest of the lesson — and why moving the class on never relabels anything.
  */
 export function QuestionQueue({
   questions,
+  sections,
   disabled,
   act,
   code,
 }: {
   questions: QuestionView[];
+  sections: SectionView[];
   disabled: boolean;
   act: HostAction;
   code: string;
 }) {
   const [showHidden, setShowHidden] = useState(false);
+  const [sectionFilter, setSectionFilter] = useState<string>("all");
 
   const { open, answered, hidden } = useMemo(() => {
     const byVotes = (a: QuestionView, b: QuestionView) =>
       b.votes - a.votes || b.createdAt.localeCompare(a.createdAt);
+    const inFilter = (q: QuestionView) =>
+      sectionFilter === "all" ||
+      (sectionFilter === "general" ? q.sectionId === null : q.sectionId === sectionFilter);
+    const shown = questions.filter(inFilter);
     return {
-      open: questions.filter((q) => q.status === "open").sort(byVotes),
-      answered: questions.filter((q) => q.status === "answered").sort(byVotes),
-      hidden: questions.filter((q) => q.status === "hidden"),
+      open: shown.filter((q) => q.status === "open").sort(byVotes),
+      answered: shown.filter((q) => q.status === "answered").sort(byVotes),
+      hidden: shown.filter((q) => q.status === "hidden"),
     };
-  }, [questions]);
+  }, [questions, sectionFilter]);
+
+  const contextOf = (question: QuestionView) =>
+    question.activityTitle ?? question.sectionTitle ?? "general";
 
   return (
     <section className="card stack">
@@ -43,6 +57,23 @@ export function QuestionQueue({
         </div>
         <span className="tiny muted">{open.length} waiting</span>
       </div>
+
+      {sections.length > 1 || questions.some((q) => q.sectionId) ? (
+        <select
+          className="select"
+          value={sectionFilter}
+          aria-label="Filter questions by section"
+          onChange={(event) => setSectionFilter(event.target.value)}
+        >
+          <option value="all">All sections</option>
+          <option value="general">General questions</option>
+          {sections.map((section) => (
+            <option key={section.id} value={section.id}>
+              {section.title}
+            </option>
+          ))}
+        </select>
+      ) : null}
 
       {open.length === 0 ? (
         <p className="empty">No open questions right now.</p>
@@ -56,6 +87,7 @@ export function QuestionQueue({
                   <span className="tiny muted">
                     {question.votes} {question.votes === 1 ? "vote" : "votes"}
                     {question.authorName ? ` · ${question.authorName}` : " · anonymous"}
+                    {` · ${contextOf(question)}`}
                   </span>
                 </div>
                 <div className="btn-group">

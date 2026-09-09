@@ -1,5 +1,5 @@
 export type HostAction = (
   path: string,
   body?: unknown,
-  method?: "POST" | "DELETE",
+  method?: "POST" | "PATCH" | "DELETE",
 ) => Promise<boolean>;

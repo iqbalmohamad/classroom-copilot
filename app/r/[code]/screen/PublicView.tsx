@@ -1,6 +1,7 @@
 "use client";
 
 import { useRoomState } from "@/lib/client/useRoomState";
+import { TimerChip } from "@/components/TimerChip";
 import type { PollTally, PublicSnapshot } from "@/lib/types";
 
 /**
@@ -48,8 +49,16 @@ export function PublicView({
   return (
     <main className="public-shell">
       <header className="public-header">
-        <span className="public-title">{snapshot.room.title}</span>
-        <span className="public-code">{code}</span>
+        <span className="public-title">
+          {snapshot.room.title}
+          {snapshot.room.currentSectionTitle ? (
+            <span className="public-section"> · {snapshot.room.currentSectionTitle}</span>
+          ) : null}
+        </span>
+        <span className="row" style={{ gap: 16 }}>
+          {snapshot.timer ? <TimerChip timer={snapshot.timer} size="large" /> : null}
+          <span className="public-code">{code}</span>
+        </span>
       </header>
 
       <div className="public-main">
@@ -93,6 +102,61 @@ function Stage({
           Over to
         </p>
         <p className="public-pick">{snapshot.lastPick.displayName}</p>
+      </div>
+    );
+  }
+
+  if (mode === "response" && snapshot.revealedResponse) {
+    const response = snapshot.revealedResponse;
+    return (
+      <div className="stack">
+        <p className="public-waiting" style={{ textAlign: "left" }}>
+          {response.authorName ? `${response.authorName}'s answer` : "One answer from the room"}
+        </p>
+        <p className="public-question">{response.activityTitle}</p>
+        {response.fields.map((field) => {
+          const value = response.answers[field.key];
+          if (value === undefined) return null;
+          return (
+            <div key={field.key}>
+              <p className="public-field-label">{field.label}</p>
+              {field.type === "sql" || field.type === "long_text" ? (
+                <pre className="public-pre">{value}</pre>
+              ) : (
+                <p className="public-option">
+                  {field.type === "choice"
+                    ? (field.options ?? []).find((option) => option.value === value)?.label ?? value
+                    : value}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  if (mode === "activity" && snapshot.activity) {
+    const activity = snapshot.activity;
+    return (
+      <div className="stack">
+        <p className="public-question">{activity.title}</p>
+        {activity.instructions ? (
+          <p className="public-option">{activity.instructions}</p>
+        ) : null}
+        <div>
+          {activity.fields.map((field) => (
+            <p className="public-field-label" key={field.key}>
+              {field.label}
+              {field.type === "choice"
+                ? `: ${(field.options ?? []).map((option) => option.label).join(" · ")}`
+                : ""}
+            </p>
+          ))}
+        </div>
+        <p className="public-waiting" style={{ textAlign: "left" }}>
+          {activity.status === "open" ? "Answer on your phone" : "Answers closed"}
+        </p>
       </div>
     );
   }

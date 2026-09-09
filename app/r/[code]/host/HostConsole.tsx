@@ -13,6 +13,13 @@ import { QuestionQueue } from "@/components/host/QuestionQueue";
 import { PickerPanel } from "@/components/host/PickerPanel";
 import { RosterPanel } from "@/components/host/RosterPanel";
 import { ClassReadPanel } from "@/components/host/ClassReadPanel";
+import { SectionBar } from "@/components/host/SectionBar";
+import { ActivityPanel } from "@/components/host/ActivityPanel";
+import { ResponsesPanel } from "@/components/host/ResponsesPanel";
+import { TimerPanel } from "@/components/host/TimerPanel";
+import { MaterialsPanel } from "@/components/host/MaterialsPanel";
+import { PlanPanel } from "@/components/host/PlanPanel";
+import { TimerChip } from "@/components/TimerChip";
 
 /**
  * The instructor console.
@@ -35,9 +42,10 @@ export function HostConsole({
 }) {
   const { snapshot, connection, refresh } = useRoomState(code, "instructor");
   const [error, setError] = useState<string | null>(null);
+  const [reviewing, setReviewing] = useState<string | null>(null);
 
   const act = useCallback(
-    async (path: string, body?: unknown, method: "POST" | "DELETE" = "POST") => {
+    async (path: string, body?: unknown, method: "POST" | "PATCH" | "DELETE" = "POST") => {
       setError(null);
       try {
         await api(path, { method, body, code, role: "instructor" });
@@ -84,6 +92,9 @@ export function HostConsole({
   }
 
   const ended = snapshot.room.status === "ended";
+  const reviewingActivity = reviewing
+    ? snapshot.activities.find((activity) => activity.id === reviewing) ?? null
+    : null;
 
   return (
     <main className="page stack">
@@ -95,12 +106,21 @@ export function HostConsole({
           </p>
         </div>
         <div className="row">
+          {snapshot.timer ? <TimerChip timer={snapshot.timer} /> : null}
           <ConnectionBadge connection={connection} />
           <Link className="btn btn-sm" href={`/r/${code}/summary`}>
             Summary
           </Link>
         </div>
       </header>
+
+      <SectionBar
+        code={code}
+        sections={snapshot.sections}
+        currentId={snapshot.room.currentSectionId}
+        disabled={ended}
+        act={act}
+      />
 
       {ended ? (
         <div className="notice" role="status">
@@ -118,7 +138,31 @@ export function HostConsole({
       <div className="console-grid">
         <div className="stack">
           <PollPanel snapshot={snapshot} disabled={ended} act={act} code={code} />
-          <QuestionQueue questions={snapshot.questions} disabled={ended} act={act} code={code} />
+          <ActivityPanel
+            code={code}
+            activities={snapshot.activities}
+            sections={snapshot.sections}
+            disabled={ended}
+            act={act}
+            onReview={setReviewing}
+          />
+          {reviewingActivity ? (
+            <ResponsesPanel
+              code={code}
+              activity={reviewingActivity}
+              version={snapshot.version}
+              disabled={ended}
+              act={act}
+              onClose={() => setReviewing(null)}
+            />
+          ) : null}
+          <QuestionQueue
+            questions={snapshot.questions}
+            sections={snapshot.sections}
+            disabled={ended}
+            act={act}
+            code={code}
+          />
         </div>
 
         <div className="stack">
@@ -127,15 +171,39 @@ export function HostConsole({
             publicMode={snapshot.room.publicMode}
             polls={snapshot.polls}
             hasPick={snapshot.picks.length > 0}
+            hasActivity={snapshot.activities.some((activity) => activity.status !== "draft")}
+            hasRevealedResponse={snapshot.room.publicMode === "response"}
             ended={ended}
             disabled={ended}
             act={act}
           />
           <InvitePanel code={code} joinUrl={joinUrl} qr={qr} hostToken={hostToken} />
-          <PulsePanel pulse={snapshot.pulse} disabled={ended} act={act} code={code} />
+          <TimerPanel
+            code={code}
+            timer={snapshot.timer}
+            activities={snapshot.activities}
+            disabled={ended}
+            act={act}
+          />
+          <PulsePanel
+            round={snapshot.pulseRound}
+            history={snapshot.pulseHistory}
+            disabled={ended}
+            act={act}
+            code={code}
+          />
           <PickerPanel picks={snapshot.picks} disabled={ended} act={act} code={code} />
+          <MaterialsPanel
+            code={code}
+            materials={snapshot.materials}
+            sections={snapshot.sections}
+            currentSectionId={snapshot.room.currentSectionId}
+            disabled={ended}
+            act={act}
+          />
           {snapshot.aiEnabled ? <ClassReadPanel code={code} disabled={ended} /> : null}
           <RosterPanel roster={snapshot.roster} />
+          <PlanPanel code={code} disabled={ended} act={act} />
           {!ended ? (
             <button
               className="btn btn-danger btn-block"
@@ -157,5 +225,5 @@ export function HostConsole({
 export type HostAction = (
   path: string,
   body?: unknown,
-  method?: "POST" | "DELETE",
+  method?: "POST" | "PATCH" | "DELETE",
 ) => Promise<boolean>;

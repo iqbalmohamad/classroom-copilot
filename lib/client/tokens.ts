@@ -66,3 +66,49 @@ export function authHeaders(code: string, role: "instructor" | "learner" | "publ
   }
   return headers;
 }
+
+/**
+ * Saved session plans, kept in the instructor's own browser.
+ *
+ * The plan token is a credential: whoever holds it can read the plan and start
+ * a class from it. It is stored here for the same reason the learner token is —
+ * there are no accounts to hang it on — and it is deliberately never shown in a
+ * URL, so it cannot end up in history, a referrer or a proxy log.
+ */
+const PLANS = "cc.plans";
+
+export interface StoredPlan {
+  id: string;
+  token: string;
+  title: string;
+}
+
+export const planKeys = {
+  list(): StoredPlan[] {
+    const raw = read(PLANS);
+    if (!raw) return [];
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(
+        (entry): entry is StoredPlan =>
+          !!entry &&
+          typeof entry === "object" &&
+          typeof (entry as StoredPlan).id === "string" &&
+          typeof (entry as StoredPlan).token === "string" &&
+          typeof (entry as StoredPlan).title === "string",
+      );
+    } catch {
+      return [];
+    }
+  },
+
+  remember(id: string, token: string, title: string): void {
+    const next = [{ id, token, title }, ...planKeys.list().filter((plan) => plan.id !== id)];
+    write(PLANS, JSON.stringify(next.slice(0, 20)));
+  },
+
+  find(id: string): StoredPlan | null {
+    return planKeys.list().find((plan) => plan.id === id) ?? null;
+  },
+};
