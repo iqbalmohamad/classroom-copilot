@@ -51,56 +51,74 @@ export function projectedPoll(polls: PollView[]): PollView | null {
   );
 }
 
-export interface ScreenNote {
-  /** Why this screen has nothing of its own to put up. */
-  reason: string;
-  /** What the class is looking at instead. */
-  instead: string;
+/**
+ * The class is looking at a question whose results the instructor has not
+ * revealed. Neither "Poll question" nor "Poll results" describes that honestly:
+ * the question is up, and the results are deliberately not.
+ */
+export const HIDDEN_RESULTS_LABEL = "Question — results hidden";
+
+/** After the class ends the screen shows a closing message, whatever the mode. */
+export const ENDED_LABEL = "Class ended";
+
+export interface ScreenState {
+  /**
+   * What the presentation screen is actually showing — not which screen is
+   * selected. The two differ whenever the chosen screen has no content, and the
+   * instructor is looking at the console precisely because they cannot check.
+   */
+  label: string;
+  /** Why the selection and the screen differ, short enough to scan. */
+  reason: string | null;
+  /** What to do about it, where there is something specific to do. */
+  action: string | null;
 }
 
 /**
- * Why the chosen screen is not showing what its name suggests, or null when it
- * is. Written for someone mid-lesson: the reason on its own is enough when
- * scanning the options, and the pair together says what the class can see right
- * now, which is the thing the instructor cannot check for themselves.
+ * What the class can see, given the instructor's selection and the room.
+ *
+ * Mirrors `Stage` in app/r/[code]/screen/PublicView.tsx branch for branch: a
+ * mode with nothing behind it falls through to the join screen there, so it
+ * must read as the join screen here too.
  */
-export function screenNote(mode: PublicMode, context: ScreenContext): ScreenNote | null {
-  if (context.ended) {
-    return {
-      reason: "The class has ended.",
-      instead: "The screen shows a closing message.",
-    };
-  }
+export function describeScreen(mode: PublicMode, context: ScreenContext): ScreenState {
+  const settled = (label: string): ScreenState => ({ label, reason: null, action: null });
+
+  if (context.ended) return settled(ENDED_LABEL);
 
   const poll = projectedPoll(context.polls);
-  const noPollYet = {
-    reason: "No question has been shown yet.",
-    instead: "The screen is showing the join code.",
-  };
+  const fallback = (reason: string): ScreenState => ({
+    label: SCREEN_LABELS.join,
+    reason,
+    action: null,
+  });
+  const noPollYet = "No question has been shown yet.";
 
   switch (mode) {
     case "poll":
-      return poll ? null : noPollYet;
+      return poll ? settled(SCREEN_LABELS.poll) : fallback(noPollYet);
+
     case "results":
-      if (!poll) return noPollYet;
-      // Choosing this screen never reveals a hidden result: the class sees the
-      // question and a "results coming up" line until the instructor reveals.
+      if (!poll) return fallback(noPollYet);
+      // Selecting this screen does not reveal anything, so say what the class
+      // is left looking at and how to change that.
       return poll.revealed
-        ? null
+        ? settled(SCREEN_LABELS.results)
         : {
-            reason: "Results stay hidden until you show them.",
-            instead:
-              "The screen keeps the question up until you use \u201cShow results on screen\u201d " +
-              "under Ask the class.",
+            label: HIDDEN_RESULTS_LABEL,
+            reason: "The class can see the question, not the split.",
+            action: "Use \u201cShow results on screen\u201d under Ask the class to reveal them.",
           };
+
     case "pick":
       return context.hasPick
-        ? null
-        : {
-            reason: "No one has been picked yet.",
-            instead: "The screen is showing the join code.",
-          };
+        ? settled(SCREEN_LABELS.pick)
+        : fallback("No one has been picked yet.");
+
+    case "waiting":
+      return settled(SCREEN_LABELS.waiting);
+
     default:
-      return null;
+      return settled(SCREEN_LABELS.join);
   }
 }

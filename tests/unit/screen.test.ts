@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { SCREEN_LABELS, projectedPoll, screenNote } from "@/lib/domain/screen";
+import {
+  ENDED_LABEL,
+  HIDDEN_RESULTS_LABEL,
+  SCREEN_LABELS,
+  describeScreen,
+  projectedPoll,
+} from "@/lib/domain/screen";
 import type { PollView } from "@/lib/types";
 
 const poll = (over: Partial<PollView> & { id: string }): PollView => ({
@@ -53,39 +59,67 @@ describe("which poll the class is looking at", () => {
   });
 });
 
-describe("what the console tells the instructor", () => {
-  it("says nothing when the chosen screen has its content", () => {
-    const open = poll({ id: "p", status: "open", revealed: true, openedAt: "2026-09-13T09:00:00Z" });
-    expect(screenNote("join", context([]))).toBeNull();
-    expect(screenNote("waiting", context([]))).toBeNull();
-    expect(screenNote("poll", context([open]))).toBeNull();
-    expect(screenNote("results", context([open]))).toBeNull();
-    expect(screenNote("pick", context([], { hasPick: true }))).toBeNull();
+describe("what the console reports as showing", () => {
+  const open = (over: Partial<PollView> = {}) =>
+    poll({ id: "p", status: "open", openedAt: "2026-09-13T09:00:00.000Z", ...over });
+
+  it("names the content, not the selection, when the two differ", () => {
+    // The whole point of the status line is that the instructor cannot see the
+    // tab they are sharing. Echoing their own click back at them would report
+    // "Poll results" while the room looks at a join code.
+    expect(describeScreen("results", context([])).label).toBe("Join code & QR");
+    expect(describeScreen("poll", context([])).label).toBe("Join code & QR");
+    expect(describeScreen("pick", context([])).label).toBe("Join code & QR");
   });
 
-  it("explains the fallback to the join code when there is nothing to show", () => {
-    expect(screenNote("poll", context([]))).toEqual({
-      reason: "No question has been shown yet.",
-      instead: "The screen is showing the join code.",
-    });
-    expect(screenNote("results", context([]))?.instead).toMatch(/join code/);
-    expect(screenNote("pick", context([]))?.reason).toMatch(/No one has been picked/);
+  it("names the content when the selection does have it", () => {
+    expect(describeScreen("join", context([])).label).toBe("Join code & QR");
+    expect(describeScreen("waiting", context([])).label).toBe("Waiting screen");
+    expect(describeScreen("poll", context([open()])).label).toBe("Poll question");
+    expect(describeScreen("results", context([open({ revealed: true })])).label).toBe(
+      "Poll results",
+    );
+    expect(describeScreen("pick", context([], { hasPick: true })).label).toBe(
+      "Selected participant",
+    );
   });
 
-  it("says results are held back rather than pretending the screen is empty", () => {
-    // Choosing the results screen must not read as "results are up". The class
-    // sees the question until the instructor reveals.
-    const hidden = poll({ id: "p", status: "closed", revealed: false });
-    const note = screenNote("results", context([hidden]))!;
-    expect(note.reason).toMatch(/hidden until you show them/);
-    // ...and it points at the control that does reveal them, rather than
-    // leaving the instructor hunting for it mid-lesson.
-    expect(note.instead).toMatch(/Show results on screen/);
+  it("distinguishes a question with hidden results from both other states", () => {
+    const state = describeScreen("results", context([open()]));
+    expect(state.label).toBe(HIDDEN_RESULTS_LABEL);
+    // Not "Poll results" — nothing is on screen — and not "Poll question"
+    // either, because the instructor has asked for results and needs to know
+    // they are being withheld rather than that their click did nothing.
+    expect(state.label).not.toBe("Poll results");
+    expect(state.label).not.toBe("Poll question");
+    expect(state.reason).toBe("The class can see the question, not the split.");
+    expect(state.action).toMatch(/Show results on screen/);
   });
 
-  it("says the same thing for every screen once the class has ended", () => {
+  it("says the class has ended, whatever screen was selected", () => {
     for (const mode of ["join", "poll", "results", "pick", "waiting"] as const) {
-      expect(screenNote(mode, context([], { ended: true }))?.reason).toMatch(/class has ended/);
+      const state = describeScreen(mode, context([open()], { ended: true }));
+      expect(state.label).toBe(ENDED_LABEL);
+      expect(state.action).toBeNull();
+    }
+  });
+
+  it("gives a scannable reason for a selection with nothing behind it", () => {
+    expect(describeScreen("poll", context([])).reason).toBe("No question has been shown yet.");
+    expect(describeScreen("results", context([])).reason).toBe("No question has been shown yet.");
+    expect(describeScreen("pick", context([])).reason).toBe("No one has been picked yet.");
+  });
+
+  it("says nothing extra once the chosen screen is the one up", () => {
+    for (const state of [
+      describeScreen("join", context([])),
+      describeScreen("waiting", context([])),
+      describeScreen("poll", context([open()])),
+      describeScreen("results", context([open({ revealed: true })])),
+      describeScreen("pick", context([], { hasPick: true })),
+    ]) {
+      expect(state.reason).toBeNull();
+      expect(state.action).toBeNull();
     }
   });
 

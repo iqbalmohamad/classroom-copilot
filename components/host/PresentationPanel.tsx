@@ -3,7 +3,7 @@
 import { useId, useState } from "react";
 import Link from "next/link";
 import type { PollView, PublicMode } from "@/lib/types";
-import { SCREEN_LABELS, SCREEN_ORDER, screenNote } from "@/lib/domain/screen";
+import { SCREEN_LABELS, SCREEN_ORDER, describeScreen } from "@/lib/domain/screen";
 import type { HostAction } from "./types";
 
 /**
@@ -41,7 +41,7 @@ export function PresentationPanel({
   const hintId = useId();
 
   const context = { polls, hasPick, ended };
-  const currentNote = screenNote(publicMode, context);
+  const showing = describeScreen(publicMode, context);
 
   return (
     <section className="card stack">
@@ -57,12 +57,15 @@ export function PresentationPanel({
         Share this presentation tab with your class. Control what it shows from here.
       </p>
 
+      {/* The class's view, not the instructor's selection. Naming the chosen
+          screen here would have the console confidently report "Poll results"
+          while the room looks at a join code. */}
       <div className="screen-status" role="status">
         <span className="screen-status-label">Currently showing</span>
-        <span className="screen-status-value">{SCREEN_LABELS[publicMode]}</span>
-        {currentNote ? (
+        <span className="screen-status-value">{showing.label}</span>
+        {showing.reason || showing.action ? (
           <span className="tiny muted" style={{ display: "block", marginTop: 4 }}>
-            {currentNote.reason} {currentNote.instead}
+            {[showing.reason, showing.action].filter(Boolean).join(" ")}
           </span>
         ) : null}
       </div>
@@ -89,7 +92,7 @@ export function PresentationPanel({
               {SCREEN_ORDER.map((mode) => {
                 // The current screen's own note is in the status block above, so
                 // only the others carry a hint paragraph to point at.
-                const hasHint = mode !== publicMode && screenNote(mode, context) !== null;
+                const hasHint = mode !== publicMode && describeScreen(mode, context).reason !== null;
                 return (
                   <button
                     key={mode}
@@ -108,13 +111,13 @@ export function PresentationPanel({
             {/* Say which of these have nothing behind them before they are
                 clicked, rather than letting the instructor pick one and wonder
                 why the class is still looking at the join code. */}
-            {SCREEN_ORDER.filter((mode) => mode !== publicMode && screenNote(mode, context)).map(
-              (mode) => (
-                <p className="tiny muted" id={`${hintId}-${mode}`} key={mode} style={{ margin: 0 }}>
-                  <strong>{SCREEN_LABELS[mode]}:</strong> {screenNote(mode, context)!.reason}
-                </p>
-              ),
-            )}
+            {SCREEN_ORDER.filter(
+              (mode) => mode !== publicMode && describeScreen(mode, context).reason,
+            ).map((mode) => (
+              <p className="tiny muted" id={`${hintId}-${mode}`} key={mode} style={{ margin: 0 }}>
+                <strong>{SCREEN_LABELS[mode]}:</strong> {describeScreen(mode, context).reason}
+              </p>
+            ))}
 
             <p className="tiny muted" style={{ margin: 0 }}>
               The presentation screen never shows the roster, and shows a learner&apos;s name only
