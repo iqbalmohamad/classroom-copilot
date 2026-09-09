@@ -140,10 +140,22 @@ export async function deleteSection(room: RoomRow, sectionId: string): Promise<v
 /**
  * Move the class to a section, or on to the next one.
  *
- * Deliberately touches nothing but the pointer. Advancing must not open a draft
- * activity that was being prepared quietly, must not close what is collecting,
- * and must not clear a pulse round — a section change is navigation, and every
- * one of those would be a surprise mid-lesson.
+ * Navigation, with exactly one consequence: a pulse round belonging to the
+ * section being left is closed.
+ *
+ * Leaving it open was wrong. The round carries the section it was asked about,
+ * so a learner tapping after the class moved on would have been counted against
+ * the part of the lesson they are no longer in — the instructor would read
+ * "Section 2: 3 lost" and be looking at answers about Section 1. Closing it
+ * preserves every response as history, and the next round opens in the new
+ * section either when the instructor asks or when the class taps.
+ *
+ * Everything else is still untouched: no draft poll or activity is published,
+ * nothing that is collecting answers is closed, and no result is erased.
+ *
+ * The whole thing happens under the room's advisory lock, so a learner
+ * submitting a pulse at the same moment either lands in the old round before it
+ * closes or is refused for naming a closed one — never silently redirected.
  */
 export async function selectSection(
   room: RoomRow,
@@ -153,21 +165,52 @@ export async function selectSection(
 
   return sql.begin(async (tx) => {
     await lockRoom(tx, room.id);
+
+    // Re-read inside the lock. The row this request loaded may be several
+    // navigations old if two console tabs are open.
+    const current = (
+      await tx<{ current_section_id: string | null }[]>`
+        select current_section_id from rooms where id = ${room.id}`
+    )[0];
+
     const sections = await tx<{ id: string; position: number; title: string }[]>`
       select id, position, title from sections where room_id = ${room.id} order by position asc`;
+
+    /**
+     * Points the room at a section and closes a round left behind by the move.
+     *
+     * pulse_rounds before rooms, and not the other way round. setPulse holds a
+     * share lock on the open round and then reaches `rooms` through the version
+     * trigger, so taking `rooms` first here put the two in opposite orders and
+     * deadlocked a learner tapping at the moment the class moved on — which is
+     * precisely the moment this code exists for.
+     */
+    const goTo = async (target: { id: string; title: string }) => {
+      // A round already asked about the destination stays open; only one about
+      // somewhere else is closed. Its answers remain, as history.
+      await tx`
+        update pulse_rounds set status = 'closed', closed_at = now()
+        where room_id = ${room.id}
+          and status = 'open'
+          and section_id is distinct from ${target.id}`;
+      await tx`update rooms set current_section_id = ${target.id} where id = ${room.id}`;
+      return target;
+    };
 
     if (sectionId) {
       const target = sections.find((section) => section.id === sectionId);
       if (!target) throw new ApiError("bad_request", "That section is not part of this class.");
-      await tx`update rooms set current_section_id = ${target.id} where id = ${room.id}`;
+      await goTo(target);
       await logEvent(tx, room.id, "section_selected", { position: target.position });
       return { id: target.id, title: target.title, created: false };
     }
 
-    const currentIndex = sections.findIndex((section) => section.id === room.current_section_id);
+    const currentIndex = sections.findIndex(
+      (section) => section.id === current?.current_section_id,
+    );
     const next = sections[currentIndex + 1];
     if (next) {
-      await tx`update rooms set current_section_id = ${next.id} where id = ${room.id}`;
+      await goTo(next);
       await logEvent(tx, room.id, "section_selected", { position: next.position });
       return { id: next.id, title: next.title, created: false };
     }
@@ -182,7 +225,7 @@ export async function selectSection(
     const created = await tx<{ id: string }[]>`
       insert into sections (room_id, position, title) values (${room.id}, ${position}, ${title})
       returning id`;
-    await tx`update rooms set current_section_id = ${created[0]!.id} where id = ${room.id}`;
+    await goTo({ id: created[0]!.id, title });
     await logEvent(tx, room.id, "section_created", { position, viaNext: true });
     return { id: created[0]!.id, title, created: true };
   });
@@ -293,6 +336,36 @@ export async function updateActivity(
   });
 }
 
+/**
+ * Puts prepared activities in the order the instructor wants to run them.
+ *
+ * `seq` is that order, and it is what a saved plan preserves, so a deck
+ * reordered here comes back reordered next term. Accepted only as a complete
+ * permutation, under the room's lock: a partial list would leave positions to
+ * be inferred, and inferring them is how a prepared session ends up interleaved
+ * with itself.
+ */
+export async function reorderActivities(room: RoomRow, order: string[]): Promise<void> {
+  assertRoomOpen(room);
+
+  await sql.begin(async (tx) => {
+    await lockRoom(tx, room.id);
+    const current = await tx<{ id: string }[]>`
+      select id from activities where room_id = ${room.id} order by seq asc`;
+
+    const next = permutationOf(current.map((row) => row.id), order);
+    if (!next) {
+      throw new ApiError("conflict", "The activity list has changed. Reload and try again.");
+    }
+
+    // One pass, relying on the deferred unique constraint from 0004.
+    for (const [index, id] of next.entries()) {
+      await tx`update activities set seq = ${index + 1} where id = ${id}`;
+    }
+    await logEvent(tx, room.id, "activities_reordered", { count: next.length });
+  });
+}
+
 export type ActivityAction = "open" | "close" | "again" | "delete";
 
 export async function actOnActivity(
@@ -393,6 +466,17 @@ export async function submitActivityResponse(
   assertRoomOpen(room);
 
   return sql.begin(async (tx) => {
+    // Participants before rooms — see the lock-order note in service.ts. It has
+    // to come before the enforcement below, which reaches `rooms` through the
+    // version triggers on timers and activities.
+    await tx`update participants set last_seen_at = now() where id = ${participantId}`;
+
+    // Apply any elapsed deadline first, in this transaction. Without it the
+    // status read below is only as fresh as the last snapshot anyone happened
+    // to build, and an answer arriving a minute after the bell would be
+    // accepted purely because nobody had looked at the room since.
+    await enforceTimersIn(tx, room.id);
+
     const rows = await tx<{ status: string; fields: unknown }[]>`
       select status, fields from activities
       where id = ${activityId} and room_id = ${room.id} for share`;
@@ -404,9 +488,6 @@ export async function submitActivityResponse(
 
     const check = validateAnswers(parseFields(activity.fields), rawAnswers);
     if (!check.ok) throw new ApiError("bad_request", check.reason);
-
-    // Participants before rooms — see the lock-order note in service.ts.
-    await tx`update participants set last_seen_at = now() where id = ${participantId}`;
 
     await tx`
       insert into activity_responses (activity_id, participant_id, room_id, answers)
@@ -488,16 +569,21 @@ export async function reviewResponse(
 // ------------------------------------------------------------------ timers
 
 /**
- * Close out timers whose deadline has passed.
+ * Close out timers whose deadline has passed, inside the caller's transaction.
  *
- * Called from every read and every write, so expiry does not depend on an
- * instructor's browser being awake: any connected client — a learner's phone,
- * the projector — drives it. With nobody connected at all the closure is
- * applied by the next request that touches the room, which is the earliest
- * moment it can matter.
+ * The deadline is enforced here, at the write boundary, not by a scheduler and
+ * not by whichever surface happens to read state next. Every write that could
+ * be affected by an elapsed timer calls this first, in its own transaction, so
+ * an answer posted after the bell is refused even if nobody has looked at the
+ * room since — a submission must not depend on someone else having rendered a
+ * snapshot.
+ *
+ * Ending the timer and closing its activity are one statement pair in one
+ * transaction, so the pair cannot be left half-applied: there is no moment at
+ * which the clock has stopped but the activity is still taking answers.
  */
-export async function enforceTimers(roomId: string): Promise<void> {
-  const expired = await sql<{ id: string; activity_id: string | null; auto_close: boolean }[]>`
+export async function enforceTimersIn(tx: Tx, roomId: string): Promise<void> {
+  const expired = await tx<{ id: string; activity_id: string | null; auto_close: boolean }[]>`
     update timers
     set status = 'ended', expired = true, ended_at = ends_at
     where room_id = ${roomId} and status = 'running' and ends_at <= now()
@@ -505,13 +591,21 @@ export async function enforceTimers(roomId: string): Promise<void> {
 
   for (const timer of expired) {
     if (timer.auto_close && timer.activity_id) {
-      await sql`update activities set status = 'closed', closed_at = now()
-                where id = ${timer.activity_id} and status = 'open'`;
+      await tx`update activities set status = 'closed', closed_at = now()
+               where id = ${timer.activity_id} and status = 'open'`;
     }
-    await sql`insert into session_events (room_id, kind, payload)
-              values (${roomId}, 'timer_expired',
-                      ${sql.json({ timerId: timer.id, autoClose: timer.auto_close } as never)})`;
+    await logEvent(tx, roomId, "timer_expired", {
+      timerId: timer.id,
+      autoClose: timer.auto_close,
+    });
   }
+}
+
+/** The same enforcement for a caller that has no transaction of its own. */
+export async function enforceTimers(roomId: string): Promise<void> {
+  await sql.begin(async (tx) => {
+    await enforceTimersIn(tx, roomId);
+  });
 }
 
 export async function startTimer(room: RoomRow, input: StartTimerInput): Promise<{ id: string }> {
@@ -554,6 +648,11 @@ export async function actOnTimer(
   seconds?: number,
 ): Promise<void> {
   await sql.begin(async (tx) => {
+    // The clock may have run out since the console last rendered. Settle that
+    // first, so pause/resume/extend act on what the timer actually is rather
+    // than on what the instructor's screen last showed.
+    await enforceTimersIn(tx, room.id);
+
     const rows = await tx<
       {
         id: string;

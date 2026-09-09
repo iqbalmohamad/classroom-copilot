@@ -244,7 +244,17 @@ function toActivityView(
   return view;
 }
 
-const ACTIVITY_COLUMNS = sql`
+/**
+ * The activity column list, as a function rather than a constant.
+ *
+ * A `sql\`...\`` fragment evaluated at module scope calls the connection proxy
+ * during import, which on Workers happens outside any request — and the proxy
+ * refuses, correctly, because a connection there belongs to the request that
+ * opened it. The whole server module then fails to instantiate and every route
+ * returns 500. Node never notices, because its pool is process-wide; only the
+ * workerd run catches it.
+ */
+const activityColumns = () => sql`
   id, seq, section_id, title, instructions, fields, status, attempt, duration_seconds,
   reference_answer, created_at, opened_at, closed_at`;
 
@@ -433,8 +443,10 @@ export async function instructorSnapshot(
 
   const sections = await roomSections(room.id);
   const [activityRows, responseCounts, materials, timer] = await Promise.all([
+    // The order the instructor put them in, so the console can show and change
+    // it. Grouping by section is the console's job; the sequence is this one's.
     sql<ActivityRow[]>`
-      select ${ACTIVITY_COLUMNS} from activities where room_id = ${room.id} order by seq desc`,
+      select ${activityColumns()} from activities where room_id = ${room.id} order by seq asc`,
     activityResponseCounts(room.id),
     roomMaterials(room.id, sections),
     roomTimer(room.id),
@@ -564,7 +576,7 @@ export async function learnerSnapshot(
     // closed. Their own work staying visible is what makes feedback readable
     // after the exercise has moved on.
     sql<ActivityRow[]>`
-      select ${ACTIVITY_COLUMNS} from activities a
+      select ${activityColumns()} from activities a
       where a.room_id = ${room.id}
         and (a.status = 'open'
              or exists (select 1 from activity_responses r
@@ -574,8 +586,16 @@ export async function learnerSnapshot(
       limit 12`,
     roomMaterials(room.id, sections),
     roomTimer(room.id),
-    sql<{ id: string; label: string | null; status: "open" | "closed" }[]>`
-      select id, label, status from pulse_rounds
+    sql<
+      {
+        id: string;
+        seq: number;
+        label: string | null;
+        section_id: string | null;
+        status: "open" | "closed";
+      }[]
+    >`
+      select id, seq, label, section_id, status from pulse_rounds
       where room_id = ${room.id} and status = 'open' limit 1`,
   ]);
 
@@ -633,7 +653,14 @@ export async function learnerSnapshot(
     spotlight: (lastPick[0]?.participant_id ?? null) === participantId,
     sections,
     pulseRound: roundRows[0]
-      ? { id: roundRows[0].id, label: roundRows[0].label, status: roundRows[0].status }
+      ? {
+          id: roundRows[0].id,
+          seq: roundRows[0].seq,
+          label: roundRows[0].label,
+          sectionTitle:
+            sections.find((section) => section.id === roundRows[0]!.section_id)?.title ?? null,
+          status: roundRows[0].status,
+        }
       : null,
     activities: openActivityRows.map((row) => toActivityView(row, undefined, "learner")),
     mySubmissions: mySubmissionRows.map<MySubmission>((row) => ({
@@ -684,7 +711,7 @@ export async function publicSnapshot(room: RoomRow, origin: string): Promise<Pub
     // whether or not it is still collecting, so a closed activity stays legible
     // on the projector while it is discussed.
     sql<ActivityRow[]>`
-      select ${ACTIVITY_COLUMNS} from activities
+      select ${activityColumns()} from activities
       where room_id = ${room.id} and status in ('open', 'closed')
       order by coalesce(opened_at, created_at) desc limit 1`,
     roomTimer(room.id),

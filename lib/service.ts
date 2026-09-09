@@ -245,6 +245,19 @@ export async function setPulse(
   assertRoomOpen(room);
 
   return sql.begin(async (tx) => {
+    // Serialise every write that touches a pulse round for this room.
+    //
+    // Row locks are not enough here. `pulse_rounds` carries a version trigger,
+    // so writing a round is also a write to `rooms` inside the same statement —
+    // which means a learner holding the round's share lock while waiting for
+    // `rooms`, and an instructor moving the class on, form a cycle whichever
+    // order the statements are written in. Postgres detected it as a deadlock
+    // the first time a learner tapped at the exact moment the class advanced.
+    // One advisory lock removes the cycle instead of shuffling it around; the
+    // transactions it serialises are a millisecond each, and they already
+    // queued on the `rooms` row anyway.
+    await lockRoom(tx, room.id);
+
     // Participants before rooms, always: setPulse and respondToPoll both touch
     // the room through a version trigger, and taking the two in a different
     // order in one of them is how the same learner deadlocks against themselves.
@@ -263,13 +276,19 @@ export async function setPulse(
 
     if (!round) {
       // Quick-start: the instructor never opened a round, the class just tapped.
-      await lockRoom(tx, room.id);
+      // Read the section inside the lock. The room row this request loaded can
+      // be a navigation behind, and a round opened against a stale section is
+      // exactly the mis-attribution closing rounds on navigation prevents.
+      const here = (
+        await tx<{ current_section_id: string | null }[]>`
+          select current_section_id from rooms where id = ${room.id}`
+      )[0];
       const seqRows = await tx<{ next: number }[]>`
         select coalesce(max(seq), 0) + 1 as next from pulse_rounds where room_id = ${room.id}`;
       const seq = seqRows[0]?.next ?? 1;
       const created = await tx<{ id: string }[]>`
         insert into pulse_rounds (room_id, section_id, seq, label)
-        values (${room.id}, ${room.current_section_id}, ${seq}, ${`Round ${seq}`})
+        values (${room.id}, ${here?.current_section_id ?? null}, ${seq}, ${`Round ${seq}`})
         on conflict do nothing
         returning id`;
       round =

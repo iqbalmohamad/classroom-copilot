@@ -232,7 +232,7 @@ function LearnerRoom({ code, onLeave }: { code: string; onLeave: () => void }) {
       <PulseCard
         code={code}
         current={snapshot.me.pulse}
-        roundId={snapshot.pulseRound?.id ?? null}
+        round={snapshot.pulseRound}
         disabled={ended}
         onError={flash}
         onDone={refresh}
@@ -392,15 +392,15 @@ function PollCard({
 function PulseCard({
   code,
   current,
-  roundId,
+  round,
   disabled,
   onError,
   onDone,
 }: {
   code: string;
   current: PulseValue | null;
-  /** Which round this phone believes is collecting. */
-  roundId: string | null;
+  /** The round this phone believes is collecting, and what it is about. */
+  round: LearnerSnapshot["pulseRound"];
   disabled: boolean;
   onError: (message: string) => void;
   onDone: () => void;
@@ -415,7 +415,7 @@ function PulseCard({
       // from being counted against a question the class has not been asked yet.
       await api(`/api/rooms/${code}/pulse`, {
         method: "POST",
-        body: { pulse, roundId },
+        body: { pulse, roundId: round?.id ?? null },
         code,
         role: "learner",
       });
@@ -432,6 +432,14 @@ function PulseCard({
       <div className="card-title" style={{ marginBottom: 0 }}>
         How are you doing?
       </div>
+      {/* Which part of the lesson this is about. A round is closed when the
+          class moves on, so without this a learner would be rating one section
+          while looking at the next one on the projector. */}
+      <p className="tiny muted" style={{ margin: 0 }}>
+        {round
+          ? `About ${round.sectionTitle ?? "this class"} · ${round.label ?? `Round ${round.seq}`}`
+          : "Tap whenever you like — it starts a new round for wherever the class is now."}
+      </p>
       <div className="pulse-grid">
         {PULSE_VALUES.map((value) => (
           <button

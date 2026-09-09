@@ -326,8 +326,18 @@ export interface LearnerSnapshot {
   /** Set when this learner is the most recently picked participant. */
   spotlight: boolean;
   sections: SectionView[];
-  /** Just enough of the round to answer it: its id, and whether it is open. */
-  pulseRound: { id: string; label: string | null; status: PulseRoundStatus } | null;
+  /**
+   * Just enough of the round to answer it — and to say what it is about, so a
+   * learner can see which part of the lesson they are rating rather than
+   * guessing from what is on the projector.
+   */
+  pulseRound: {
+    id: string;
+    seq: number;
+    label: string | null;
+    sectionTitle: string | null;
+    status: PulseRoundStatus;
+  } | null;
   /**
    * What this learner can act on or has acted on: everything open, plus
    * anything closed that they answered — so a submission and its feedback do
