@@ -30,3 +30,7 @@ _bench_*.ts
 .dev.vars.*
 .open-next/
 .wrangler/
+
+# Written by `next dev` on every start; not part of the application.
+/AGENTS.md
+/CLAUDE.md
