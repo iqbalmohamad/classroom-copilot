@@ -17,13 +17,16 @@ Three surfaces, one room.
 
 **Instructor console** (`/r/<CODE>/host`) — private. The join code, link and QR;
 who is in the room and whether they have answered; a poll composer and the live
-distribution; the class pulse; the anonymous question queue; a participant
-picker; and one panel, **Presentation screen**, that opens the screen you share
-and says what the class is looking at.
+distribution; open-ended activities and the answers they collect; the class
+pulse; the anonymous question queue; a participant picker; timers; shared
+materials; and one panel, **Presentation screen**, that opens the screen you
+share and says what the class is looking at.
 
 **Learner view** (`/r/<CODE>`) — mobile-first. Join with a name, no account.
-Answer the live poll, set a pulse of *Got it / Shaky / Lost*, ask a question
-anonymously, and upvote other people's questions.
+Answer the live poll, write an open-ended answer (a word, a number, a paragraph,
+pasted SQL), read the instructor's private feedback on it, set a pulse of *Got
+it / Shaky / Lost*, ask a question about the section you are in, upvote other
+people's questions, and open the links the instructor has shared.
 
 **Presentation screen** (`/r/<CODE>/screen`) — read-only, for screen sharing or
 a projector. Join instructions with a QR, the live question, aggregate results
@@ -45,14 +48,71 @@ upvotes, the pulse at the end, and the picker history. Printable.
 | Roster | Live, private to the instructor: names, presence, and who has been called on. Deliberately no pulse and no per-poll answer flag — see Privacy below. |
 | Polls | Yes/No, A–D multiple choice, confidence 1–5. One poll open at a time. One answer per learner, changeable until close. A closed poll rejects answers. |
 | Reveal | The instructor always sees the live distribution. Learners and the presentation screen see it only after **Show results on screen** — choosing the results screen does not reveal anything by itself. |
+| Named vs anonymous | Polls, pulse and questions are unchanged: aggregate-only, anonymous by default. Activity submissions are the one named surface, and learners are told so on the form before they type. |
 | Class pulse | One value per learner, replaced on every tap. The instructor sees aggregate counts and percentages only, never who chose what. |
 | Ask again | Putting an earlier question to the class again starts a fresh round rather than reopening the old one, so the projector never shows the previous distribution as the new one. |
 | Questions | Anonymous by default. One upvote per learner (a toggle, so tapping can never inflate it). The instructor can mark answered, reopen, or remove. |
 | Participant picker | Uniform random. Learners who have not been picked yet come first; nobody is picked twice in a row while anyone else is available. Session history is kept. |
-| Session summary | Counts, poll distributions, questions, pulse and picker history. |
+| Sections | Optional. Every room starts with "Section 1"; **Next** makes the following one when you need it. Prepare, rename and reorder them before or during class. Moving between sections opens nothing, closes nothing and clears nothing. |
+| Pulse rounds | The pulse belongs to a section and a round. **Ask again** closes the round and opens a fresh one, so the answer before an explanation survives to be compared with the answer after it. A tap aimed at a round that has closed is refused, not redirected. |
+| Activities | Open-ended exercises: short text, a number, a paragraph, SQL that keeps its formatting, several fields at once, or a choice plus a written explanation. One submission per learner, editable while it is open. **Run again** creates a fresh attempt rather than overwriting the first. |
+| Review | Named submissions, private per-learner feedback, review states (pending / reviewed / needs follow-up), a filter, and **Invite to explain**, which spotlights the author and records it in the picker's history. |
+| Revealing an answer | One at a time, on the shared screen, anonymous unless the instructor deliberately names the author. |
+| Timers | A stored deadline, so the console, every phone and the projector count down from the same instant and a refresh costs nobody a second. Start, pause, resume, extend, end; optionally close the activity when it runs out. |
+| Materials | Http/https links only, attached to the session or to a section, pinnable to the top of every phone. |
+| Session plans | Save this room's preparation and start another class from it. Learner data cannot travel in one. |
+| Session summary | Counts, poll distributions, pulse by section and round, activities with named answers and review status, questions with their context, materials, and picker history. Printable, and downloadable as CSV. |
 | AI Class Read | **Optional and off unless a key is configured.** Reads aggregates only, returns two or three advisory sentences, changes nothing, and fails silently. |
 
 ---
+
+## Running a session
+
+### Quick start — no preparation at all
+
+Start a class, read the code out, teach. The room already has a section called
+"Section 1", so polls, activities, questions and pulse rounds all have somewhere
+to belong without anyone naming anything. When you move on, press **Next** and
+"Section 2" appears. Every quick action is one click from the top of the
+console: **Open poll**, **Ask now** for an open-ended activity, a timer preset,
+**Ask again** for the pulse, **Pick a learner**.
+
+Nothing below is required to teach a whole lesson.
+
+### Prepared — a deck's worth of structure, before anyone joins
+
+1. **Sections.** In the console, **Plan sections** → add, rename, reorder. For
+   Day 30 that is *Why SQL Exists · Database Structure · DDL/DML · Environment
+   Setup · DDL Practice*.
+2. **Activities.** Type the prompt, then **More options** for the answer fields
+   (a choice plus a written explanation, a number and a SQL box, three short
+   answers — up to eight fields), your own private reference answer, and a
+   suggested duration. **Save for later** keeps it as a draft; **Ask now** puts
+   it in front of the class.
+3. **Materials.** Paste the dataset, install-guide and LMS links. Pin the one
+   the class needs right now and it goes to the top of every phone.
+4. **Save the plan.** **Prepare & reuse → Save this session as a plan** stores
+   the sections, exercises, polls, durations, materials and reference answers in
+   this browser. Next week, **Start a class from it** creates a brand-new room
+   with fresh credentials and all of it as drafts. No learner, submission,
+   pulse, vote or pick can travel in a plan. To bring across a single exercise
+   instead, use **Reuse an exercise** from inside the new room.
+
+### During the lesson
+
+**Next** moves the class on; it never publishes a draft or clears a result.
+**Ask again** starts a fresh pulse round and keeps the previous one readable
+underneath, which is how a before-and-after comparison works. A timer's deadline
+is stored on the server, so every surface counts down together and closure
+happens on time whether or not the console is awake. **Review** on an activity
+opens the named answers: mark them, write private feedback, put one on the
+shared screen (anonymous unless you name the author), or invite its author to
+talk it through.
+
+Afterwards, **Summary** is printable and has a **Download CSV** for marking.
+Coming back to a previous session needs the instructor cookie or the instructor
+link — a room code alone opens nothing.
+
 
 ## Stack
 
@@ -132,6 +192,34 @@ a second browser (or a phone on the same network) to see both sides.
 | `npm run verify` | Typecheck then tests |
 
 ---
+
+## Migrations
+
+Forward-only SQL files in `db/migrations/`, applied by `npm run db:migrate` with
+the same database role the application connects as (see the RLS note at the top
+of `0001_init.sql`). Running it twice is a no-op.
+
+| File | What it adds |
+| --- | --- |
+| `0001_init.sql` | Rooms, participants, polls, questions, picks, the version trigger, RLS |
+| `0002_participant_references.sql` | Makes a participant deletable without breaking their questions or picks |
+| `0003_classroom_workflow.sql` | Sections, pulse rounds, activities and their answers, timers, materials, question context, session plans |
+
+**`0003` is additive and safe to apply to a live database.** It creates new
+tables, adds nullable columns, and widens one CHECK constraint; it drops
+nothing. Its backfill gives every existing room a "Section 1" and moves the
+pulse each learner is currently holding into a first round, so a class in
+progress when it is applied keeps its readout on screen. `participants.pulse` is
+left in place, marked deprecated, as the record of what the pulse was before
+the move.
+
+No configuration changes are required: there are no new environment variables,
+and no change to `wrangler.jsonc`.
+
+```bash
+# against the class database, from the machine that holds its credentials
+DATABASE_URL='postgresql://...' npm run db:migrate
+```
 
 ## Environment variables
 
@@ -545,9 +633,19 @@ app/
   api/rooms/                      every route handler
 components/host/                  instructor console panels
   PresentationPanel.tsx           the shared screen: open it, and say what is on it
+  SectionBar.tsx                  where the class is, and how to move it
+  ActivityPanel.tsx               compose and run open-ended exercises
+  ResponsesPanel.tsx              the marking pile: review, feedback, reveal
+components/learner/               the phone: activity form, materials
 lib/
   domain/                         pure classroom rules (no I/O, heavily tested)
   domain/screen.ts                what the presentation screen is showing, and why
+  domain/activities.ts            answer fields, and what counts as a valid answer
+  domain/links.ts                 http/https only, nothing executable
+  domain/csv.ts                   quoting, and defusing spreadsheet formulas
+  workflow.ts                     sections, activities, review, timers, materials
+  plans.ts                        reusable session plans, owned by a token
+  export.ts                       the session as a spreadsheet
   projections.ts                  the privacy boundary: one builder per role
   service.ts                      every mutation, each a short transaction
   auth.ts                         the two token types and how they are checked
@@ -582,6 +680,22 @@ These are real and current, not hypotheticals.
 - **Workers Paid ($5/month) is required.** The Free plan's 50 subrequests per
   invocation and Hyperdrive's 100k queries/day both break under a single class;
   the reasoning and numbers are under Deployment.
+- **Timer expiry is applied on read, not by a scheduler.** There is no cron in
+  this deployment, so a timer's deadline is enforced by the next request that
+  touches the room. In practice that is within a poll interval, because every
+  connected learner phone and the projector are reading constantly — the
+  instructor's browser does not have to be awake. With literally nobody
+  connected, closure lands on the next read, which is the first moment it can
+  make any difference to anyone.
+- **A session plan lives in one browser.** Plans are owned by a token kept in
+  the instructor's own `localStorage`, because the product has no accounts.
+  Clearing site data loses the list; the plan rows survive but there is no way
+  to enumerate them without the token. That is the same trade-off the
+  instructor link already makes.
+- **The instructor review list is fetched, not streamed.** It refreshes whenever
+  the room version moves, which is as live as everything else, but a forty-way
+  class pasting SQL would be a large realtime payload and it is deliberately not
+  one.
 - **Rooms are never cleaned up.** There is no retention policy or expiry job.
   Rows accumulate; for a handful of classes this does not matter.
 - **A lost instructor cookie needs the instructor link.** The instructor
@@ -619,9 +733,19 @@ These are real and current, not hypotheticals.
 
 ---
 
-## Not in M0
+## Scope
 
-Deliberately absent, per `PRD.md`: accounts and SSO, payments, institutions,
-LMS integrations, native apps, chat, video, breakout rooms, slide authoring,
-leaderboards and badges, learner analytics over time, and any AI that acts on
-the classroom rather than advising the instructor.
+M0 shipped the live classroom: rooms, polls, pulse, anonymous questions, a
+picker, a shared screen and a summary. The **classroom workflow expansion**
+added what a taught session actually needs around those — sections, pulse
+rounds, open-ended activities with review and feedback, timers, materials,
+contextual questions, reusable plans and a fuller summary. Both are described
+above; the expansion is additive, and a room created before it behaves exactly
+like one created after it.
+
+Still deliberately absent: accounts and SSO, payments, institutions, LMS
+integrations, native apps, chat, video, breakout rooms, slide authoring,
+leaderboards and badges, learner analytics over time, an SQL execution engine,
+automated grading, and any AI that acts on the classroom rather than advising
+the instructor. Practice SQL stays in DBeaver and PostgreSQL; final assignments
+are still submitted through the LMS.

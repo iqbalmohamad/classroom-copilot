@@ -1,3 +1,12 @@
+> **Superseded in part — classroom workflow expansion (September 2026).**
+>
+> This document describes the M0 implementation assignment, which is complete.
+> A later assignment expanded the scope to the taught-session workflow: sections,
+> pulse rounds, open-ended activities with review and feedback, timers,
+> materials, contextual questions, session plans, and the extended summary and
+> export. Read `README.md` for what the product does now; the engineering
+> priorities and constraints below still apply.
+
 # Current Assignment — M0: First Classroom
 
 **Status:** READY FOR IMPLEMENTATION  
