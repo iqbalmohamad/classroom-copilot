@@ -74,8 +74,32 @@ export function ActivityPanel({
     setBusy(false);
   }
 
-  const live = activities.filter((activity) => activity.status === "open");
-  const rest = activities.filter((activity) => activity.status !== "open");
+  /**
+   * Grouped by section, in the order the instructor put them in.
+   *
+   * Section-aware, because "which exercises belong to Environment Setup" is the
+   * question being asked when preparing; ordered, because that order is what
+   * gets run and what a saved plan preserves.
+   */
+  const grouped: { key: string; title: string; items: ActivityView[] }[] = [];
+  for (const section of sections) {
+    const items = activities.filter((activity) => activity.sectionId === section.id);
+    if (items.length > 0) grouped.push({ key: section.id, title: section.title, items });
+  }
+  const loose = activities.filter(
+    (activity) => !sections.some((section) => section.id === activity.sectionId),
+  );
+  if (loose.length > 0) grouped.push({ key: "none", title: "No section", items: loose });
+
+  /** Moves one activity past its neighbour, sending the whole order. */
+  async function move(activity: ActivityView, direction: -1 | 1) {
+    const order = activities.map((entry) => entry.id);
+    const from = order.indexOf(activity.id);
+    const to = from + direction;
+    if (to < 0 || to >= order.length) return;
+    [order[from], order[to]] = [order[to]!, order[from]!];
+    await act(`/api/rooms/${code}/activities/reorder`, { order });
+  }
 
   return (
     <section className="card stack">
@@ -240,16 +264,24 @@ export function ActivityPanel({
         <p className="empty">Nothing yet. Ask something, or prepare it before class.</p>
       ) : null}
 
-      {[...live, ...rest].map((activity) => (
-        <ActivityRow
-          key={activity.id}
-          code={code}
-          activity={activity}
-          sections={sections}
-          disabled={disabled}
-          act={act}
-          onReview={onReview}
-        />
+      {grouped.map((group) => (
+        <div className="stack-sm" key={group.key}>
+          {grouped.length > 1 ? <span className="label">{group.title}</span> : null}
+          {group.items.map((activity) => (
+            <ActivityRow
+              key={activity.id}
+              code={code}
+              activity={activity}
+              sections={sections}
+              disabled={disabled}
+              act={act}
+              onReview={onReview}
+              onMove={move}
+              first={activities[0]?.id === activity.id}
+              last={activities[activities.length - 1]?.id === activity.id}
+            />
+          ))}
+        </div>
       ))}
     </section>
   );
@@ -262,6 +294,9 @@ function ActivityRow({
   disabled,
   act,
   onReview,
+  onMove,
+  first,
+  last,
 }: {
   code: string;
   activity: ActivityView;
@@ -269,7 +304,11 @@ function ActivityRow({
   disabled: boolean;
   act: HostAction;
   onReview: (activityId: string) => void;
+  onMove: (activity: ActivityView, direction: -1 | 1) => void;
+  first: boolean;
+  last: boolean;
 }) {
+  const [editing, setEditing] = useState(false);
   const section = sections.find((entry) => entry.id === activity.sectionId);
   const needsAttention = activity.reviewCounts?.needs_follow_up ?? 0;
   const pending = activity.reviewCounts?.pending ?? 0;
@@ -297,7 +336,41 @@ function ActivityRow({
         )}
       </div>
 
+      {editing ? (
+        <ActivityEditor
+          code={code}
+          activity={activity}
+          sections={sections}
+          disabled={disabled}
+          act={act}
+          onDone={() => setEditing(false)}
+        />
+      ) : null}
+
       <div className="btn-group">
+        <button
+          className="btn btn-sm"
+          disabled={disabled || first}
+          aria-label={`Move ${activity.title} earlier`}
+          onClick={() => onMove(activity, -1)}
+        >
+          ↑
+        </button>
+        <button
+          className="btn btn-sm"
+          disabled={disabled || last}
+          aria-label={`Move ${activity.title} later`}
+          onClick={() => onMove(activity, 1)}
+        >
+          ↓
+        </button>
+        <button
+          className="btn btn-sm"
+          onClick={() => setEditing((open) => !open)}
+          aria-expanded={editing}
+        >
+          {editing ? "Done editing" : "Edit"}
+        </button>
         {activity.status === "open" ? (
           <button
             className="btn btn-sm"
@@ -344,5 +417,244 @@ function ActivityRow({
         ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * Editing a prepared activity: every field the composer offers.
+ *
+ * The answer fields are the one part that can stop being editable — the server
+ * refuses to change them once anyone has answered, because doing so would
+ * silently re-attribute submissions to questions that were never asked. The
+ * form says so rather than letting the instructor discover it from an error.
+ */
+function ActivityEditor({
+  code,
+  activity,
+  sections,
+  disabled,
+  act,
+  onDone,
+}: {
+  code: string;
+  activity: ActivityView;
+  sections: SectionView[];
+  disabled: boolean;
+  act: HostAction;
+  onDone: () => void;
+}) {
+  const [title, setTitle] = useState(activity.title);
+  const [instructions, setInstructions] = useState(activity.instructions ?? "");
+  const [reference, setReference] = useState(activity.referenceAnswer ?? "");
+  const [minutes, setMinutes] = useState(
+    activity.durationSeconds ? String(Math.round(activity.durationSeconds / 60)) : "",
+  );
+  const [sectionId, setSectionId] = useState(activity.sectionId ?? "");
+  const [fields, setFields] = useState<DraftField[]>(
+    activity.fields.map((field) => ({
+      label: field.label,
+      type: field.type,
+      choices: (field.options ?? []).map((option) => option.label).join("\n"),
+    })),
+  );
+  const [busy, setBusy] = useState(false);
+
+  const answered = activity.responseCount > 0;
+
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    const ok = await act(
+      `/api/rooms/${code}/activities/${activity.id}`,
+      {
+        title,
+        instructions: instructions.trim() || null,
+        referenceAnswer: reference.trim() || null,
+        durationSeconds: minutes.trim() ? Math.round(Number(minutes) * 60) : null,
+        sectionId: sectionId || null,
+        ...(answered
+          ? {}
+          : {
+              fields: fields.map((field) => ({
+                label: field.label,
+                type: field.type,
+                choices: field.type === "choice" ? field.choices.split("\n") : undefined,
+              })),
+            }),
+      },
+      "PATCH",
+    );
+    setBusy(false);
+    if (ok) onDone();
+  }
+
+  return (
+    <form className="stack-sm activity-editor" onSubmit={save}>
+      <div className="field">
+        <label className="label" htmlFor={`edit-title-${activity.id}`}>
+          Prompt
+        </label>
+        <input
+          id={`edit-title-${activity.id}`}
+          className="input"
+          value={title}
+          maxLength={200}
+          onChange={(event) => setTitle(event.target.value)}
+        />
+      </div>
+
+      <div className="field">
+        <label className="label" htmlFor={`edit-instructions-${activity.id}`}>
+          Extra instructions
+        </label>
+        <textarea
+          id={`edit-instructions-${activity.id}`}
+          className="textarea"
+          value={instructions}
+          maxLength={2000}
+          onChange={(event) => setInstructions(event.target.value)}
+        />
+      </div>
+
+      <div className="field">
+        <label className="label" htmlFor={`edit-section-${activity.id}`}>
+          Section
+        </label>
+        <select
+          id={`edit-section-${activity.id}`}
+          className="select"
+          value={sectionId}
+          onChange={(event) => setSectionId(event.target.value)}
+        >
+          <option value="">No section</option>
+          {sections.map((section) => (
+            <option key={section.id} value={section.id}>
+              {section.title}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {answered ? (
+        <p className="tiny muted" style={{ margin: 0 }}>
+          {activity.responseCount} {activity.responseCount === 1 ? "learner has" : "learners have"}{" "}
+          answered, so the answer fields are fixed. Use <strong>Run again</strong> to ask a changed
+          version without touching what they wrote.
+        </p>
+      ) : (
+        <>
+          <span className="label">Answer fields</span>
+          {fields.map((field, index) => (
+            <div className="stack-sm" key={index}>
+              <div className="row">
+                <input
+                  className="input"
+                  value={field.label}
+                  maxLength={120}
+                  aria-label={`Edit field ${index + 1} label`}
+                  onChange={(event) =>
+                    setFields((current) =>
+                      current.map((entry, i) =>
+                        i === index ? { ...entry, label: event.target.value } : entry,
+                      ),
+                    )
+                  }
+                />
+                <select
+                  className="select"
+                  value={field.type}
+                  aria-label={`Edit field ${index + 1} type`}
+                  onChange={(event) =>
+                    setFields((current) =>
+                      current.map((entry, i) =>
+                        i === index
+                          ? { ...entry, type: event.target.value as ActivityFieldType }
+                          : entry,
+                      ),
+                    )
+                  }
+                >
+                  {(Object.keys(ACTIVITY_FIELD_LABELS) as ActivityFieldType[]).map((type) => (
+                    <option key={type} value={type}>
+                      {ACTIVITY_FIELD_LABELS[type]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {field.type === "choice" ? (
+                <textarea
+                  className="textarea"
+                  value={field.choices}
+                  aria-label={`Edit field ${index + 1} options`}
+                  placeholder="One option per line"
+                  onChange={(event) =>
+                    setFields((current) =>
+                      current.map((entry, i) =>
+                        i === index ? { ...entry, choices: event.target.value } : entry,
+                      ),
+                    )
+                  }
+                />
+              ) : null}
+            </div>
+          ))}
+          <div className="btn-group">
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={fields.length >= 8}
+              onClick={() => setFields((current) => [...current, { ...BLANK_FIELD }])}
+            >
+              Add a field
+            </button>
+            {fields.length > 1 ? (
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => setFields((current) => current.slice(0, -1))}
+              >
+                Remove the last
+              </button>
+            ) : null}
+          </div>
+        </>
+      )}
+
+      <div className="field">
+        <label className="label" htmlFor={`edit-reference-${activity.id}`}>
+          Your own answer (private)
+        </label>
+        <textarea
+          id={`edit-reference-${activity.id}`}
+          className="textarea"
+          value={reference}
+          maxLength={4000}
+          onChange={(event) => setReference(event.target.value)}
+        />
+      </div>
+
+      <div className="field">
+        <label className="label" htmlFor={`edit-minutes-${activity.id}`}>
+          Suggested minutes
+        </label>
+        <input
+          id={`edit-minutes-${activity.id}`}
+          className="input"
+          inputMode="numeric"
+          value={minutes}
+          onChange={(event) => setMinutes(event.target.value.replace(/[^0-9.]/g, ""))}
+        />
+      </div>
+
+      <div className="btn-group">
+        <button className="btn btn-sm btn-primary" type="submit" disabled={disabled || busy}>
+          {busy ? "Saving…" : "Save changes"}
+        </button>
+        <button className="btn btn-sm" type="button" onClick={onDone}>
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }

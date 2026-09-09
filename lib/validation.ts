@@ -141,6 +141,10 @@ export const updateActivitySchema = z.object({
   durationSeconds: z.number().int().min(10).max(36000).nullish(),
 });
 
+export const reorderActivitiesSchema = z.object({
+  order: z.array(z.string().uuid()).min(1).max(200),
+});
+
 export const activityActionSchema = z.object({
   action: z.enum(["open", "close", "again", "delete"]),
 });
