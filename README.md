@@ -233,6 +233,13 @@ The event stream holds its connection for the life of the stream and releases it
 when the stream ends, cycles, or the learner disconnects (`lib/db.ts`,
 `openDatabaseScope`).
 
+This is the second reason Hyperdrive is not optional. A class of forty holds
+about forty-two open streams, so without a pooler in front the database would
+see forty-two concurrent connections from the Worker — measured at 44 during a
+30-minute rehearsal on `workerd`, flat, with no growth. Supabase's direct
+connection limit is well below that on smaller instances. Hyperdrive multiplexes
+those onto a much smaller origin pool.
+
 ### Steps
 
 1. **Create the database.** Any Supabase project. Copy the connection string
@@ -245,11 +252,22 @@ when the stream ends, cycles, or the learner disconnects (`lib/db.ts`,
 2. **Create the Hyperdrive configuration** and put its id in `wrangler.jsonc`:
    ```bash
    npx wrangler hyperdrive create classroom-copilot-db \
-     --connection-string="postgresql://USER:PASSWORD@HOST:5432/postgres"
+     --connection-string="postgresql://USER:PASSWORD@HOST:5432/postgres" \
+     --caching-disabled
    ```
    Replace `REPLACE_WITH_HYPERDRIVE_ID` in `wrangler.jsonc` with the id it
    prints. The database password lives in the Hyperdrive config, not in the
    Worker.
+
+   **`--caching-disabled` is not optional.** Hyperdrive caches SQL responses by
+   default. The realtime transport works by re-reading one counter
+   (`rooms.version`) about once a second, so a cached read means learners keep
+   seeing the previous question after the instructor has moved on — the product
+   silently stops being live, with nothing in the logs to say so. If a
+   configuration already exists without the flag, fix it in place:
+   ```bash
+   npx wrangler hyperdrive update <id> --caching-disabled
+   ```
 
 3. **Set the public origin.** Until the hostname exists this cannot be known, so
    deploy once, note the `*.workers.dev` hostname (or attach a custom domain),

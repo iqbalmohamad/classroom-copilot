@@ -14,7 +14,7 @@ export function requestOrigin(req: Request): string {
   // `host` is set by the platform from the request line; `x-forwarded-host` is
   // whatever the client sent unless a proxy overwrites it. Preferring the
   // former stops a request with a spoofed forwarded host from producing join
-  // links and QR codes that point somewhere else. Set NEXT_PUBLIC_APP_URL in
+  // links and QR codes that point somewhere else. Set APP_ORIGIN in
   // production and none of this matters.
   const host =
     req.headers.get("host") ?? req.headers.get("x-forwarded-host") ?? "localhost:3000";
