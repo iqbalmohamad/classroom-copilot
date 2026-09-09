@@ -235,6 +235,7 @@ function LearnerRoom({ code, onLeave }: { code: string; onLeave: () => void }) {
         round={snapshot.pulseRound}
         sectionId={snapshot.room.currentSectionId}
         sectionTitle={snapshot.room.currentSectionTitle}
+        pulseEpoch={snapshot.room.pulseEpoch}
         disabled={ended}
         onError={flash}
         onDone={refresh}
@@ -397,6 +398,7 @@ function PulseCard({
   round,
   sectionId,
   sectionTitle,
+  pulseEpoch,
   disabled,
   onError,
   onDone,
@@ -409,6 +411,9 @@ function PulseCard({
    *  while no round is open would be rating. */
   sectionId: string | null;
   sectionTitle: string | null;
+  /** Which pulse context that section view belongs to — this visit, not an
+   *  earlier one, and not the one before an "Ask again". */
+  pulseEpoch: number;
   disabled: boolean;
   onError: (message: string) => void;
   onDone: () => void;
@@ -426,7 +431,7 @@ function PulseCard({
       // showed.
       await api(`/api/rooms/${code}/pulse`, {
         method: "POST",
-        body: { pulse, roundId: round?.id ?? null, sectionId },
+        body: { pulse, roundId: round?.id ?? null, sectionId, pulseEpoch },
         code,
         role: "learner",
       });

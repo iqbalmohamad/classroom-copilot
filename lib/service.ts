@@ -223,6 +223,12 @@ export async function startPulseRound(
       values (${room.id}, ${sectionId}, ${seq}, ${label})
       returning id`;
 
+    // An explicit round start is a pulse reset: whatever a learner's screen
+    // showed before it — the previous round or no round at all — is not what
+    // the class is being asked now. Bumping the epoch is what refuses a
+    // no-round tap captured before an "Ask again" in the same section.
+    await tx`update rooms set pulse_epoch = pulse_epoch + 1 where id = ${room.id}`;
+
     await logEvent(tx, room.id, "pulse_round_started", { seq, sectionId });
     return { id: rows[0]!.id, seq };
   });
@@ -242,6 +248,7 @@ export async function setPulse(
   pulse: PulseValue,
   expectedRoundId?: string | null,
   expectedSectionId?: string | null,
+  expectedEpoch?: number | null,
 ): Promise<{ roundId: string }> {
   assertRoomOpen(room);
 
@@ -268,6 +275,14 @@ export async function setPulse(
       returning id`;
     if (alive.length === 0) throw new ApiError("not_found", "You are no longer in this room.");
 
+    // The authoritative pulse context, read inside the lock that navigation
+    // and explicit round starts also hold. The room row this request loaded
+    // can be a navigation behind.
+    const here = (
+      await tx<{ current_section_id: string | null; pulse_epoch: number }[]>`
+        select current_section_id, pulse_epoch from rooms where id = ${room.id}`
+    )[0];
+
     let round = (
       await tx<{ id: string; section_id: string | null }[]>`
         select id, section_id from pulse_rounds
@@ -276,14 +291,10 @@ export async function setPulse(
     )[0];
 
     if (!round) {
-      // Quick-start: the instructor never opened a round, the class just tapped.
-      // Read the section inside the lock. The room row this request loaded can
-      // be a navigation behind, and a round opened against a stale section is
-      // exactly the mis-attribution closing rounds on navigation prevents.
-      const here = (
-        await tx<{ current_section_id: string | null }[]>`
-          select current_section_id from rooms where id = ${room.id}`
-      )[0];
+      // Quick-start: the instructor never opened a round, the class just
+      // tapped. The section read under the lock above is what the round is
+      // created against — a round opened against a stale section is exactly
+      // the mis-attribution closing rounds on navigation prevents.
       const seqRows = await tx<{ next: number }[]>`
         select coalesce(max(seq), 0) + 1 as next from pulse_rounds where room_id = ${room.id}`;
       const seq = seqRows[0]?.next ?? 1;
@@ -309,6 +320,23 @@ export async function setPulse(
       );
     }
 
+    // A tap that named no round is pinned to the pulse context its screen
+    // showed instead: the epoch, which changes on every navigation and every
+    // explicit round start, and on nothing else. Section identity alone (the
+    // check below) cannot tell two visits to the same section apart — leave A,
+    // come back to A, and a tap captured during the first visit still names a
+    // section that matches — and it cannot see an "Ask again" that happened in
+    // place. An epoch mismatch is refused, and the refusal rolls back any
+    // round this request just created. Unrelated writes (joins, questions,
+    // activity answers) never touch the epoch, so they cannot invalidate a
+    // valid tap the way the room's general version counter would.
+    if (expectedRoundId == null && expectedEpoch != null && expectedEpoch !== here?.pulse_epoch) {
+      throw new ApiError(
+        "conflict",
+        "The pulse has moved on since your screen loaded. Your tap was not counted — tap again.",
+      );
+    }
+
     // A tap from a screen that showed no round at all carries the section the
     // learner was rating instead. It may only land in that section: if the
     // class has moved since the screen loaded — a navigation put the current
@@ -321,7 +349,8 @@ export async function setPulse(
     // but the old round stays refused. A tap with a matching section joins
     // whatever is collecting, which is what keeps two quick-start taps racing
     // each other both counted. Older clients send neither field and keep the
-    // pre-section behaviour.
+    // pre-section behaviour; clients that send the section but not the epoch
+    // get this check alone, which cannot tell two visits to one section apart.
     if (
       expectedRoundId == null &&
       expectedSectionId !== undefined &&

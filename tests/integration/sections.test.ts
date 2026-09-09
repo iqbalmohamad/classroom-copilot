@@ -17,7 +17,11 @@ interface Rounds {
 }
 
 interface WithSections {
-  room: { currentSectionId: string | null; currentSectionTitle: string | null };
+  room: {
+    currentSectionId: string | null;
+    currentSectionTitle: string | null;
+    pulseEpoch: number;
+  };
   sections: { id: string; position: number; title: string }[];
 }
 
@@ -268,17 +272,19 @@ describe("sections", () => {
     // Both phones show the same section with no round. Whichever tap arrives
     // first opens the round; the other must join it, not be refused — the
     // section still matches what that screen showed.
-    const shown = (await sectionsOf(ada.learner, code, "learner")).room.currentSectionId;
+    const seen = (await sectionsOf(ada.learner, code, "learner")).room;
     const [first, second] = await Promise.all([
       ada.learner.post(`/api/rooms/${code}/pulse`, {
         pulse: "got_it",
         roundId: null,
-        sectionId: shown,
+        sectionId: seen.currentSectionId,
+        pulseEpoch: seen.pulseEpoch,
       }),
       ben.learner.post(`/api/rooms/${code}/pulse`, {
         pulse: "shaky",
         roundId: null,
-        sectionId: shown,
+        sectionId: seen.currentSectionId,
+        pulseEpoch: seen.pulseEpoch,
       }),
     ]);
     expect(first.status).toBe(200);
@@ -287,6 +293,91 @@ describe("sections", () => {
     const state = await snapshotFor<Rounds>(instructor, code, "instructor");
     expect(state.body.snapshot.pulseRound!.summary.responded).toBe(2);
     expect(await pulseRows(code)).toEqual({ rounds: 1, responses: 2 });
+  });
+
+  it("refuses a tap from an earlier visit when the class returns to a section", async () => {
+    const { instructor, code } = await createRoom();
+    const { learner } = await joinAs(code, "Ada");
+    await instructor.post(`/api/rooms/${code}/sections`, { title: "Detour" });
+
+    // The learner's screen during the first visit: Section 1, no round. The
+    // payload a tap builds from it names the section and the pulse context.
+    const seen = (await sectionsOf(learner, code, "learner")).room;
+    const original = {
+      pulse: "lost",
+      roundId: null,
+      sectionId: seen.currentSectionId,
+      pulseEpoch: seen.pulseEpoch,
+    };
+
+    // The class leaves and comes back: Section 1 → Detour → Section 1. The
+    // section now matches the stale screen again; only the context identity
+    // can tell this visit from the one the tap was captured in.
+    await instructor.post(`/api/rooms/${code}/sections/select`, {});
+    await instructor.post(`/api/rooms/${code}/sections/select`, {
+      sectionId: seen.currentSectionId,
+    });
+
+    const replay = await learner.post(`/api/rooms/${code}/pulse`, original);
+    expect(replay.status).toBe(409);
+    expect(String((replay.body as { error: { message: string } }).error.message)).toContain(
+      "moved on",
+    );
+
+    // Straight from the database, before any snapshot: the old tap left
+    // nothing behind — no response, and no round opened in the revisit.
+    expect(await pulseRows(code)).toEqual({ rounds: 0, responses: 0 });
+
+    // The refreshed phone shows the same section under a new context, and its
+    // tap counts.
+    const refreshed = (await sectionsOf(learner, code, "learner")).room;
+    expect(refreshed.currentSectionId).toBe(seen.currentSectionId);
+    expect(refreshed.pulseEpoch).not.toBe(seen.pulseEpoch);
+    const fresh = await learner.post(`/api/rooms/${code}/pulse`, {
+      pulse: "got_it",
+      roundId: null,
+      sectionId: refreshed.currentSectionId,
+      pulseEpoch: refreshed.pulseEpoch,
+    });
+    expect(fresh.status).toBe(200);
+    expect(await pulseRows(code)).toEqual({ rounds: 1, responses: 1 });
+  });
+
+  it("refuses a tap from before the pulse was explicitly restarted in place", async () => {
+    const { instructor, code } = await createRoom();
+    const { learner } = await joinAs(code, "Ada");
+
+    // Captured while nothing was collecting.
+    const seen = (await sectionsOf(learner, code, "learner")).room;
+    const original = {
+      pulse: "lost",
+      roundId: null,
+      sectionId: seen.currentSectionId,
+      pulseEpoch: seen.pulseEpoch,
+    };
+
+    // The instructor explicitly starts a round without moving anywhere. Same
+    // section, new pulse context: the class is being asked something now, and
+    // a tap from before the ask is not an answer to it.
+    await instructor.post(`/api/rooms/${code}/pulse/rounds`, { label: "After re-explaining" });
+
+    const replay = await learner.post(`/api/rooms/${code}/pulse`, original);
+    expect(replay.status).toBe(409);
+
+    // Direct database read, before any snapshot: only the instructor's round
+    // exists and it holds no responses.
+    expect(await pulseRows(code)).toEqual({ rounds: 1, responses: 0 });
+
+    // A tap sent from the refreshed screen names the round and is counted.
+    const round = (
+      await snapshotFor<{ pulseRound: { id: string } | null }>(learner, code, "learner")
+    ).body.snapshot.pulseRound!;
+    const fresh = await learner.post(`/api/rooms/${code}/pulse`, {
+      pulse: "got_it",
+      roundId: round.id,
+    });
+    expect(fresh.status).toBe(200);
+    expect(await pulseRows(code)).toEqual({ rounds: 1, responses: 1 });
   });
 
   it("keeps a round open when the section it is about is the one being entered", async () => {

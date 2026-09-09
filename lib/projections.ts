@@ -105,6 +105,7 @@ function header(room: RoomRow, sections: SectionView[]): RoomHeader {
     endedAt: room.ended_at ? room.ended_at.toISOString() : null,
     currentSectionId: current?.id ?? null,
     currentSectionTitle: current?.title ?? null,
+    pulseEpoch: room.pulse_epoch,
   };
 }
 
@@ -750,12 +751,16 @@ export async function publicSnapshot(room: RoomRow, origin: string): Promise<Pub
       }
     : null;
 
+  // The section's name belongs on the projector; its id does not, and the
+  // screen has nothing to use one for. The pulse context stays off it for the
+  // same reason: the projector never taps, so the field would be surface
+  // without a purpose — and the public payload is allow-listed by test.
+  const { pulseEpoch: _pulseEpoch, ...publicHeader } = header(room, sections);
+
   return {
     role: "public",
     version: version(room),
-    // The section's name belongs on the projector; its id does not, and the
-    // screen has nothing to use one for.
-    room: { ...header(room, sections), currentSectionId: null },
+    room: { ...publicHeader, currentSectionId: null },
     joinUrl: joinUrl(origin, room.code),
     presentCount: Number(presentRows[0]?.n ?? 0),
     activePoll: pollRow ? toPollView(pollRow, counts.get(pollRow.id) ?? {}, "public") : null,

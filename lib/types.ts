@@ -289,6 +289,14 @@ export interface RoomHeader {
   endedAt: string | null;
   currentSectionId: string | null;
   currentSectionTitle: string | null;
+  /**
+   * Identity of the current pulse context. Changes when the class navigates
+   * (even back to a section it has visited before) or when a round is
+   * explicitly started — and at no other time. A tap sent while no round was
+   * open carries it, so the tap can only land in the context its screen
+   * actually showed.
+   */
+  pulseEpoch: number;
 }
 
 export interface InstructorSnapshot {
@@ -353,7 +361,8 @@ export interface LearnerSnapshot {
 export interface PublicSnapshot {
   role: "public";
   version: number;
-  room: RoomHeader;
+  /** The projector never taps a pulse, so it does not carry the epoch. */
+  room: Omit<RoomHeader, "pulseEpoch">;
   joinUrl: string;
   presentCount: number;
   activePoll: PollView | null;

@@ -131,7 +131,10 @@ export async function deleteSection(room: RoomRow, sectionId: string): Promise<v
              where room_id = ${room.id} and position > ${target.position}`;
 
     const fallback = sections.find((section) => section.id !== sectionId)!;
-    await tx`update rooms set current_section_id = ${fallback.id}
+    // Deleting the section the class was standing in moves the class — that is
+    // a navigation, so it starts a new pulse context like any other move.
+    await tx`update rooms set current_section_id = ${fallback.id},
+                              pulse_epoch = pulse_epoch + 1
              where id = ${room.id} and current_section_id is null`;
     await logEvent(tx, room.id, "section_deleted", {});
   });
@@ -193,7 +196,17 @@ export async function selectSection(
         where room_id = ${room.id}
           and status = 'open'
           and section_id is distinct from ${target.id}`;
-      await tx`update rooms set current_section_id = ${target.id} where id = ${room.id}`;
+      // A real move also starts a new pulse context. The epoch is what lets a
+      // quick-start tap (which has no round to name) be pinned to the visit
+      // its screen showed: section identity alone cannot tell "section A, the
+      // first time" from "section A, after coming back". Selecting the section
+      // the class is already in changes nothing and keeps the context.
+      await tx`
+        update rooms
+        set current_section_id = ${target.id},
+            pulse_epoch = pulse_epoch
+              + (current_section_id is distinct from ${target.id})::int
+        where id = ${room.id}`;
       return target;
     };
 

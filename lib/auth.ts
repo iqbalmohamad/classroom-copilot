@@ -64,6 +64,8 @@ export interface RoomRow {
   public_mode: "join" | "poll" | "results" | "pick" | "waiting" | "activity" | "response";
   version: string | number;
   current_section_id: string | null;
+  /** Bumped by navigation and explicit round starts; pins no-round pulse taps. */
+  pulse_epoch: number;
   created_at: Date;
   ended_at: Date | null;
 }
@@ -80,7 +82,7 @@ export async function findRoom(code: string): Promise<RoomRow | null> {
   if (!code) return null;
   const rows = await sql<RoomRow[]>`
     select id, code, title, host_token_hash, status, public_mode, version,
-           current_section_id, created_at, ended_at
+           current_section_id, pulse_epoch, created_at, ended_at
     from rooms where code = ${code} limit 1`;
   return rows[0] ?? null;
 }

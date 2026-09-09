@@ -111,6 +111,11 @@ export const pulseResponseSchema = z.object({
    * section, absent means an older client that predates the field.
    */
   sectionId: z.string().uuid().nullish(),
+  /**
+   * The pulse context the learner's screen showed — see RoomHeader.pulseEpoch.
+   * Validated only for taps that name no round; absent on older clients.
+   */
+  pulseEpoch: z.number().int().min(0).nullish(),
 });
 
 // --------------------------------------------------------------- activities
