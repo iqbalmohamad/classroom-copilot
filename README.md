@@ -253,11 +253,13 @@ when the stream ends, cycles, or the learner disconnects (`lib/db.ts`,
 
 3. **Set the public origin.** Until the hostname exists this cannot be known, so
    deploy once, note the `*.workers.dev` hostname (or attach a custom domain),
-   then:
-   ```bash
-   npx wrangler secret put APP_ORIGIN     # https://your-host
+   then add it to the `vars` block in `wrangler.jsonc` and deploy again:
+   ```jsonc
+   "vars": { "APP_ORIGIN": "https://your-host", ... }
    ```
-   Without it, join URLs and the QR code are built from request headers.
+   It is configuration rather than a secret, so it belongs in the config file
+   where it is reviewable. Without it, join URLs and the QR code are built from
+   request headers.
 
 4. **Check and deploy.**
    ```bash

@@ -39,7 +39,7 @@ if (wrangler) {
     add(
       "Hyperdrive binding",
       "fail",
-      'still the placeholder id. Create one with:\n    npx wrangler hyperdrive create classroom-copilot-db \\\n      --connection-string="postgresql://USER:PASSWORD@HOST:5432/postgres"\n  then paste the returned id into wrangler.jsonc.',
+      'still the placeholder id. Create one with:\n    npx wrangler hyperdrive create classroom-copilot-db \\\n      --connection-string="postgresql://USER:PASSWORD@HOST:5432/postgres" \\\n      --caching-disabled\n  then paste the returned id into wrangler.jsonc.',
     );
   } else if (/"hyperdrive"\s*:/.test(wrangler)) {
     add("Hyperdrive binding", "ok", "configured");
@@ -103,6 +103,32 @@ try {
   add("Cloudflare login", "warn", "could not determine (no network, or wrangler unavailable)");
 }
 
+// --- Hyperdrive caching -----------------------------------------------------
+
+// Hyperdrive caches SQL responses by default, which breaks a transport built on
+// re-reading a counter. Only checkable when authenticated, but worth checking:
+// the symptom in a class is "everyone is stuck on the last question".
+const hyperdriveId = /"id"\s*:\s*"([0-9a-f]{16,})"/.exec(wrangler)?.[1];
+if (hyperdriveId) {
+  try {
+    const info = execFileSync("npx", ["wrangler", "hyperdrive", "get", hyperdriveId], {
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 60_000,
+    }).toString();
+    if (/"disabled"\s*:\s*true/.test(info) || /caching[^\n]*disabled/i.test(info)) {
+      add("Hyperdrive caching", "ok", "disabled, as this app requires");
+    } else {
+      add(
+        "Hyperdrive caching",
+        "fail",
+        `appears to be enabled. Realtime updates will go stale.\n  Fix: npx wrangler hyperdrive update ${hyperdriveId} --caching-disabled`,
+      );
+    }
+  } catch {
+    add("Hyperdrive caching", "warn", "could not check (not authenticated, or no network)");
+  }
+}
+
 // --- origin -----------------------------------------------------------------
 
 const origin = process.env.APP_ORIGIN?.trim();
@@ -112,7 +138,7 @@ if (origin) {
   add(
     "APP_ORIGIN",
     "warn",
-    "not set in this shell. It must be set on the deployed Worker, or join URLs and the QR code are built from request headers.\n  Set it with: npx wrangler secret put APP_ORIGIN   (or add it to [vars] once the hostname is known)",
+    "not set in this shell. It must be set on the deployed Worker, or join URLs and the QR code are built from request headers.\n  Add it to the `vars` block in wrangler.jsonc once the hostname is known.",
   );
 }
 
