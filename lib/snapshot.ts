@@ -3,6 +3,7 @@ import type { RoomRow } from "./auth";
 import { touchParticipant } from "./auth";
 import { requireHost, requireParticipant } from "./route-context";
 import { instructorSnapshot, learnerSnapshot, publicSnapshot } from "./projections";
+import { enforceTimers } from "./workflow";
 import { requestOrigin } from "./origin";
 import type { Role, Snapshot } from "./types";
 
@@ -20,6 +21,13 @@ export async function buildSnapshot(
   options: { heartbeat?: boolean } = {},
 ): Promise<Snapshot> {
   const origin = requestOrigin(req);
+
+  // A timer's deadline is enforced here rather than by a scheduler: every
+  // connected surface reads state constantly, so the closure lands within a
+  // poll interval of the deadline whether or not an instructor browser is open.
+  // With nobody connected at all it is applied by the next request that touches
+  // the room, which is the first moment it can make any difference.
+  await enforceTimers(room.id);
 
   if (role === "instructor") {
     await requireHost(req, room);

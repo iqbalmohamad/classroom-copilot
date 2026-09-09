@@ -127,18 +127,26 @@ describe("authorisation and privacy boundaries", () => {
     // Assert the exact shape rather than listing strings that must be absent:
     // a substring check can only guard against leaks someone thought of, and
     // passes trivially for any field name that was never used.
+    // An allow-list, so a field added to the projector's payload later has to
+    // be justified here rather than arriving unnoticed.
     expect(Object.keys(snapshot).sort()).toEqual([
       "activePoll",
+      "activity",
       "joinUrl",
       "lastPick",
       "presentCount",
+      "revealedResponse",
       "role",
       "room",
+      "timer",
       "version",
     ]);
     expect(Object.keys(snapshot.room as object).sort()).toEqual([
       "code",
       "createdAt",
+      // The section's name is for the class to read; its id is null here.
+      "currentSectionId",
+      "currentSectionTitle",
       "endedAt",
       "publicMode",
       "status",

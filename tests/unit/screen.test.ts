@@ -123,13 +123,25 @@ describe("what the console reports as showing", () => {
     }
   });
 
-  it("labels the five screens the way the instructor is told to expect", () => {
+  it("labels every screen the way the instructor is told to expect", () => {
     expect(SCREEN_LABELS).toEqual({
       join: "Join code & QR",
       poll: "Poll question",
       results: "Poll results",
+      activity: "Activity prompt",
+      response: "Selected response",
       pick: "Selected participant",
       waiting: "Waiting screen",
     });
+  });
+
+  it("explains an activity or response screen with nothing behind it", () => {
+    expect(describeScreen("activity", context([])).label).toBe("Join code & QR");
+    expect(describeScreen("activity", context([])).reason).toMatch(/No activity/);
+    expect(describeScreen("response", context([])).reason).toMatch(/No response/);
+
+    const withActivity = { ...context([]), hasActivity: true, hasRevealedResponse: true };
+    expect(describeScreen("activity", withActivity).label).toBe("Activity prompt");
+    expect(describeScreen("response", withActivity).label).toBe("Selected response");
   });
 });

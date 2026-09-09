@@ -18,11 +18,21 @@ export const SCREEN_LABELS: Record<PublicMode, string> = {
   join: "Join code & QR",
   poll: "Poll question",
   results: "Poll results",
+  activity: "Activity prompt",
+  response: "Selected response",
   pick: "Selected participant",
   waiting: "Waiting screen",
 };
 
-export const SCREEN_ORDER: PublicMode[] = ["join", "poll", "results", "pick", "waiting"];
+export const SCREEN_ORDER: PublicMode[] = [
+  "join",
+  "poll",
+  "results",
+  "activity",
+  "response",
+  "pick",
+  "waiting",
+];
 
 export interface ScreenContext {
   /** Every poll in the room, in any order. */
@@ -31,6 +41,10 @@ export interface ScreenContext {
   hasPick: boolean;
   /** Whether the class has ended. */
   ended: boolean;
+  /** Whether any activity has been put in front of the class. */
+  hasActivity?: boolean;
+  /** Whether the instructor has a response on the screen right now. */
+  hasRevealedResponse?: boolean;
 }
 
 /**
@@ -109,6 +123,18 @@ export function describeScreen(mode: PublicMode, context: ScreenContext): Screen
             reason: "The class can see the question, not the split.",
             action: "Use \u201cShow results on screen\u201d under Ask the class to reveal them.",
           };
+
+    case "activity":
+      return context.hasActivity
+        ? settled(SCREEN_LABELS.activity)
+        : fallback("No activity has been opened yet.");
+
+    case "response":
+      // Selecting this screen shows nothing on its own: a response reaches the
+      // projector only when the instructor reveals that specific one.
+      return context.hasRevealedResponse
+        ? settled(SCREEN_LABELS.response)
+        : fallback("No response has been put on the screen yet.");
 
     case "pick":
       return context.hasPick

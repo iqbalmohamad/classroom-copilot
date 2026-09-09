@@ -14,6 +14,8 @@ const snapshot: InstructorSnapshot = {
     title: "Class",
     status: "open",
     publicMode: "join",
+    currentSectionId: null,
+    currentSectionTitle: null,
     createdAt: "2026-09-13T10:00:00.000Z",
     endedAt: null,
   },
@@ -33,6 +35,12 @@ const snapshot: InstructorSnapshot = {
   questions: [],
   picks: [],
   aiEnabled: true,
+  sections: [],
+  pulseRound: null,
+  pulseHistory: [],
+  activities: [],
+  materials: [],
+  timer: null,
 };
 
 afterEach(() => {
