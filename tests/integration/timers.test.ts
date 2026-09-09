@@ -100,6 +100,111 @@ describe("timers", () => {
     );
   }, 30_000);
 
+  it("refuses an answer after the deadline with no state read in between", async () => {
+    const { instructor, code } = await createRoom();
+    const { learner } = await joinAs(code, "Ada");
+    const activity = await instructor.post<{ id: string }>(`/api/rooms/${code}/activities`, {
+      title: "Ten seconds, unattended",
+      openNow: true,
+    });
+    await instructor.post(`/api/rooms/${code}/timers`, {
+      durationSeconds: 10,
+      activityId: activity.body.id,
+      autoClose: true,
+    });
+
+    // Nobody reads the room while the clock runs: no console, no phone, no
+    // projector. The write itself has to apply the deadline.
+    await new Promise((resolve) => setTimeout(resolve, 11_000));
+
+    const late = await learner.post(
+      `/api/rooms/${code}/activities/${activity.body.id}/respond`,
+      { answers: { f1: "after the bell" } },
+    );
+    expect(late.status).toBe(409);
+
+    // ...and the closure it applied is complete, not half done: the timer is
+    // ended and the activity is closed, in the same transaction.
+    const host = await snapshotFor<{
+      timer: unknown;
+      activities: { id: string; status: string; responseCount: number }[];
+    }>(instructor, code, "instructor");
+    expect(host.body.snapshot.timer).toBeNull();
+    const after = host.body.snapshot.activities.find((a) => a.id === activity.body.id)!;
+    expect(after.status).toBe("closed");
+    expect(after.responseCount).toBe(0);
+  }, 30_000);
+
+  it("refuses to pause, resume or extend an elapsed timer with no state read first", async () => {
+    for (const action of ["pause", "resume", "extend"] as const) {
+      const { instructor, code } = await createRoom();
+      const started = await instructor.post<{ id: string }>(`/api/rooms/${code}/timers`, {
+        durationSeconds: 10,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 11_000));
+
+      const result = await instructor.post(`/api/rooms/${code}/timers/${started.body.id}`, {
+        action,
+        seconds: action === "extend" ? 60 : undefined,
+      });
+      // Whatever the console still shows, the timer has finished; acting on it
+      // says so rather than quietly resurrecting it.
+      expect(result.status, action).toBe(409);
+      expect(
+        String((result.body as { error: { message: string } }).error.message),
+        action,
+      ).toContain("finished");
+    }
+  }, 60_000);
+
+  it("keeps a submission racing the deadline all-or-nothing", async () => {
+    const { instructor, code } = await createRoom();
+    const learners = await Promise.all(
+      Array.from({ length: 6 }, (_, i) => joinAs(code, `P${i + 1}`)),
+    );
+    const activity = await instructor.post<{ id: string }>(`/api/rooms/${code}/activities`, {
+      title: "Racing the bell",
+      openNow: true,
+    });
+    await instructor.post(`/api/rooms/${code}/timers`, {
+      durationSeconds: 10,
+      activityId: activity.body.id,
+      autoClose: true,
+    });
+
+    // Two bursts straddling the deadline, so some requests are genuinely racing
+    // the expiry that others trigger.
+    await new Promise((resolve) => setTimeout(resolve, 9_600));
+    const submit = (entry: (typeof learners)[number]) =>
+      entry.learner.post(`/api/rooms/${code}/activities/${activity.body.id}/respond`, {
+        answers: { f1: "on the line" },
+      });
+
+    const early = await Promise.all(learners.slice(0, 3).map(submit));
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    const late = await Promise.all(learners.slice(3).map(submit));
+    const results = [...early, ...late];
+
+    // Each answer either landed or was refused — never a 500, and never a
+    // recorded answer for an activity the same request had just closed.
+    const accepted = results.filter((r) => r.status === 200).length;
+    expect(results.every((r) => r.status === 200 || r.status === 409)).toBe(true);
+
+    const list = await instructor.get<{ responses: unknown[] }>(
+      `/api/rooms/${code}/activities/${activity.body.id}/responses`,
+    );
+    expect(list.body.responses).toHaveLength(accepted);
+
+    const host = await snapshotFor<{ activities: { id: string; status: string }[] }>(
+      instructor,
+      code,
+      "instructor",
+    );
+    expect(host.body.snapshot.activities.find((a) => a.id === activity.body.id)!.status).toBe(
+      "closed",
+    );
+  }, 40_000);
+
   it("refuses to extend a timer that has already finished", async () => {
     const { instructor, code } = await createRoom();
     const started = await instructor.post<{ id: string }>(`/api/rooms/${code}/timers`, {

@@ -22,11 +22,10 @@ export async function buildSnapshot(
 ): Promise<Snapshot> {
   const origin = requestOrigin(req);
 
-  // A timer's deadline is enforced here rather than by a scheduler: every
-  // connected surface reads state constantly, so the closure lands within a
-  // poll interval of the deadline whether or not an instructor browser is open.
-  // With nobody connected at all it is applied by the next request that touches
-  // the room, which is the first moment it can make any difference.
+  // Reads settle the clock too, so a connected class sees the deadline land
+  // within a poll interval of the moment it passes. Correctness does not depend
+  // on it: every write that an elapsed timer could affect enforces the deadline
+  // itself, in its own transaction (lib/workflow.ts, enforceTimersIn).
   await enforceTimers(room.id);
 
   if (role === "instructor") {
