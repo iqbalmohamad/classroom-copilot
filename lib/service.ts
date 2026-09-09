@@ -241,6 +241,7 @@ export async function setPulse(
   participantId: string,
   pulse: PulseValue,
   expectedRoundId?: string | null,
+  expectedSectionId?: string | null,
 ): Promise<{ roundId: string }> {
   assertRoomOpen(room);
 
@@ -268,8 +269,8 @@ export async function setPulse(
     if (alive.length === 0) throw new ApiError("not_found", "You are no longer in this room.");
 
     let round = (
-      await tx<{ id: string }[]>`
-        select id from pulse_rounds
+      await tx<{ id: string; section_id: string | null }[]>`
+        select id, section_id from pulse_rounds
         where room_id = ${room.id} and status = 'open'
         order by seq desc limit 1 for share`
     )[0];
@@ -286,16 +287,17 @@ export async function setPulse(
       const seqRows = await tx<{ next: number }[]>`
         select coalesce(max(seq), 0) + 1 as next from pulse_rounds where room_id = ${room.id}`;
       const seq = seqRows[0]?.next ?? 1;
-      const created = await tx<{ id: string }[]>`
+      const created = await tx<{ id: string; section_id: string | null }[]>`
         insert into pulse_rounds (room_id, section_id, seq, label)
         values (${room.id}, ${here?.current_section_id ?? null}, ${seq}, ${`Round ${seq}`})
         on conflict do nothing
-        returning id`;
+        returning id, section_id`;
       round =
         created[0] ??
         (
-          await tx<{ id: string }[]>`
-            select id from pulse_rounds where room_id = ${room.id} and status = 'open' limit 1`
+          await tx<{ id: string; section_id: string | null }[]>`
+            select id, section_id from pulse_rounds
+            where room_id = ${room.id} and status = 'open' limit 1`
         )[0];
       if (!round) throw new ApiError("conflict", "The pulse is not open right now.");
     }
@@ -304,6 +306,30 @@ export async function setPulse(
       throw new ApiError(
         "conflict",
         "The class has moved on to a new pulse. Your last answer was not counted — tap again.",
+      );
+    }
+
+    // A tap from a screen that showed no round at all carries the section the
+    // learner was rating instead. It may only land in that section: if the
+    // class has moved since the screen loaded — a navigation put the current
+    // round, or the round this very request would create, somewhere else — the
+    // tap is refused rather than counted against a section the learner never
+    // saw. Throwing here also rolls back any round created above, so a stale
+    // tap cannot leave a round behind in the wrong section. Round identity, not
+    // section identity, guards taps that did name a round (the check above):
+    // after the class returns to an earlier section, the section matches again
+    // but the old round stays refused. A tap with a matching section joins
+    // whatever is collecting, which is what keeps two quick-start taps racing
+    // each other both counted. Older clients send neither field and keep the
+    // pre-section behaviour.
+    if (
+      expectedRoundId == null &&
+      expectedSectionId !== undefined &&
+      (expectedSectionId ?? null) !== (round.section_id ?? null)
+    ) {
+      throw new ApiError(
+        "conflict",
+        "The class has moved to a different section. Your tap was not counted — tap again.",
       );
     }
 

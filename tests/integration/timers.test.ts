@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import postgres from "postgres";
 import { Client, createRoom, joinAs, snapshotFor } from "./client";
 
 interface WithTimer {
@@ -15,6 +16,50 @@ interface WithTimer {
 
 const timerOf = async (client: Client, code: string, role = "instructor") =>
   (await snapshotFor<WithTimer>(client, code, role)).body.snapshot.timer;
+
+function db() {
+  const url = process.env.CC_TEST_DATABASE_URL ?? process.env.DATABASE_URL!;
+  return postgres(url, { max: 1, prepare: false, onnotice: () => {} });
+}
+
+/**
+ * Move a running timer's deadline into the past, directly in the database.
+ *
+ * This is the deadline genuinely elapsing, minus the wait: no app code runs,
+ * so nothing has had a chance to enforce anything when the test's next
+ * request arrives.
+ */
+async function ageTimer(code: string) {
+  const sql = db();
+  try {
+    await sql`
+      update timers set ends_at = now() - make_interval(secs => 1)
+      where room_id = (select id from rooms where code = ${code}) and status = 'running'`;
+  } finally {
+    await sql.end();
+  }
+}
+
+/**
+ * What the database actually holds — read with a plain connection, not an API
+ * route. A snapshot request would enforce deadlines itself on the way, so it
+ * cannot distinguish "the 409 committed the expiry" from "the 409 rolled the
+ * expiry back and this very read repaired it". This can.
+ */
+async function committed(activityId: string, timerId: string) {
+  const sql = db();
+  try {
+    const timers = await sql<{ status: string; expired: boolean }[]>`
+      select status, expired from timers where id = ${timerId}`;
+    const acts = await sql<{ status: string }[]>`
+      select status from activities where id = ${activityId}`;
+    const counts = await sql<{ n: number }[]>`
+      select count(*)::int as n from activity_responses where activity_id = ${activityId}`;
+    return { timer: timers[0], activity: acts[0]?.status, responses: counts[0]!.n };
+  } finally {
+    await sql.end();
+  }
+}
 
 describe("timers", () => {
   it("shows the same deadline to the instructor, the learners and the screen", async () => {
@@ -104,36 +149,150 @@ describe("timers", () => {
     const { instructor, code } = await createRoom();
     const { learner } = await joinAs(code, "Ada");
     const activity = await instructor.post<{ id: string }>(`/api/rooms/${code}/activities`, {
-      title: "Ten seconds, unattended",
+      title: "Unattended",
       openNow: true,
     });
-    await instructor.post(`/api/rooms/${code}/timers`, {
-      durationSeconds: 10,
+    const bell = await instructor.post<{ id: string }>(`/api/rooms/${code}/timers`, {
+      durationSeconds: 600,
       activityId: activity.body.id,
       autoClose: true,
     });
 
-    // Nobody reads the room while the clock runs: no console, no phone, no
-    // projector. The write itself has to apply the deadline.
-    await new Promise((resolve) => setTimeout(resolve, 11_000));
-
+    // Nobody reads the room while the clock runs out: no console, no phone,
+    // no projector. The rejected write itself has to apply the deadline.
+    await ageTimer(code);
     const late = await learner.post(
       `/api/rooms/${code}/activities/${activity.body.id}/respond`,
       { answers: { f1: "after the bell" } },
     );
     expect(late.status).toBe(409);
 
-    // ...and the closure it applied is complete, not half done: the timer is
-    // ended and the activity is closed, in the same transaction.
-    const host = await snapshotFor<{
-      timer: unknown;
-      activities: { id: string; status: string; responseCount: number }[];
-    }>(instructor, code, "instructor");
-    expect(host.body.snapshot.timer).toBeNull();
-    const after = host.body.snapshot.activities.find((a) => a.id === activity.body.id)!;
-    expect(after.status).toBe("closed");
-    expect(after.responseCount).toBe(0);
-  }, 30_000);
+    // Inspect the database directly, before any snapshot or other app read:
+    // the expiry and the closure the 409 reported must have been committed by
+    // that same rejected request, not repaired later by whoever looks next.
+    const state = await committed(activity.body.id, bell.body.id);
+    expect(state.timer).toMatchObject({ status: "ended", expired: true });
+    expect(state.activity).toBe("closed");
+    expect(state.responses).toBe(0);
+  });
+
+  it("keeps the bell settled through a refusal, a break timer and a retry", async () => {
+    const { instructor, code } = await createRoom();
+    const { learner } = await joinAs(code, "Ada");
+    const activity = await instructor.post<{ id: string }>(`/api/rooms/${code}/activities`, {
+      title: "Before the break",
+      openNow: true,
+    });
+    const bell = await instructor.post<{ id: string }>(`/api/rooms/${code}/timers`, {
+      durationSeconds: 600,
+      activityId: activity.body.id,
+      autoClose: true,
+    });
+
+    // The deadline passes with no snapshot reads.
+    await ageTimer(code);
+
+    // A late answer is refused — and the refusal must not undo the expiry.
+    const late = await learner.post(
+      `/api/rooms/${code}/activities/${activity.body.id}/respond`,
+      { answers: { f1: "late" } },
+    );
+    expect(late.status).toBe(409);
+
+    // The instructor starts a standalone break clock without a glance at
+    // state. Replacing the ended bell must not disturb what it closed.
+    const brk = await instructor.post<{ id: string }>(`/api/rooms/${code}/timers`, {
+      durationSeconds: 300,
+      label: "Break",
+    });
+    expect(brk.status).toBe(200);
+
+    // The break clock is a fresh clock, not a reopened exercise.
+    const retry = await learner.post(
+      `/api/rooms/${code}/activities/${activity.body.id}/respond`,
+      { answers: { f1: "during the break" } },
+    );
+    expect(retry.status).toBe(409);
+
+    const state = await committed(activity.body.id, bell.body.id);
+    expect(state.timer).toMatchObject({ status: "ended", expired: true });
+    expect(state.activity).toBe("closed");
+    expect(state.responses).toBe(0);
+  });
+
+  it("settles an elapsed auto-close even when the next write is a new timer", async () => {
+    const { instructor, code } = await createRoom();
+    const { learner } = await joinAs(code, "Ada");
+    const activity = await instructor.post<{ id: string }>(`/api/rooms/${code}/activities`, {
+      title: "Straight to the break",
+      openNow: true,
+    });
+    const bell = await instructor.post<{ id: string }>(`/api/rooms/${code}/timers`, {
+      durationSeconds: 600,
+      activityId: activity.body.id,
+      autoClose: true,
+    });
+    await ageTimer(code);
+
+    // The very first write after the deadline is the replacement timer
+    // itself. "End every live timer" must not swallow the elapsed bell's
+    // obligation to close its activity on the way.
+    const brk = await instructor.post<{ id: string }>(`/api/rooms/${code}/timers`, {
+      durationSeconds: 300,
+      label: "Break",
+    });
+    expect(brk.status).toBe(200);
+
+    const late = await learner.post(
+      `/api/rooms/${code}/activities/${activity.body.id}/respond`,
+      { answers: { f1: "during the break" } },
+    );
+    expect(late.status).toBe(409);
+
+    const state = await committed(activity.body.id, bell.body.id);
+    expect(state.timer).toMatchObject({ status: "ended", expired: true });
+    expect(state.activity).toBe("closed");
+    expect(state.responses).toBe(0);
+  });
+
+  it("reopens after the bell only by the instructor's own action", async () => {
+    const { instructor, code } = await createRoom();
+    const { learner } = await joinAs(code, "Ada");
+    const activity = await instructor.post<{ id: string }>(`/api/rooms/${code}/activities`, {
+      title: "Second wind",
+      openNow: true,
+    });
+    const bell = await instructor.post<{ id: string }>(`/api/rooms/${code}/timers`, {
+      durationSeconds: 600,
+      activityId: activity.body.id,
+      autoClose: true,
+    });
+    await ageTimer(code);
+
+    const late = await learner.post(
+      `/api/rooms/${code}/activities/${activity.body.id}/respond`,
+      { answers: { f1: "too late" } },
+    );
+    expect(late.status).toBe(409);
+
+    // No timer, no side door: taking more answers is the instructor's own
+    // explicit Open action, nothing else.
+    const reopened = await instructor.post(`/api/rooms/${code}/activities/${activity.body.id}`, {
+      action: "open",
+    });
+    expect(reopened.status).toBe(200);
+
+    const accepted = await learner.post(
+      `/api/rooms/${code}/activities/${activity.body.id}/respond`,
+      { answers: { f1: "second wind" } },
+    );
+    expect(accepted.status).toBe(200);
+
+    const state = await committed(activity.body.id, bell.body.id);
+    expect(state.timer).toMatchObject({ status: "ended", expired: true });
+    expect(state.activity).toBe("open");
+    expect(state.responses).toBe(1);
+  });
 
   it("refuses to pause, resume or extend an elapsed timer with no state read first", async () => {
     for (const action of ["pause", "resume", "extend"] as const) {

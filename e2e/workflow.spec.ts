@@ -446,4 +446,87 @@ test.describe("preparation and continuity", () => {
     await learnerContext.close();
     await context.close();
   });
+
+  test("moves an activity past its visible neighbour when sections interleave", async ({
+    browser,
+  }) => {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
+    const page = await context.newPage();
+
+    await page.goto("/");
+    await page.getByLabel(/class name/i).fill("Interleaved prep");
+    await page.getByRole("button", { name: /start class/i }).click();
+    await page.waitForURL(/\/r\/[A-Z0-9]{6}\/host/);
+
+    // A second section, then exercises created while hopping between the two —
+    // so the stored order interleaves the sections: Alpha one (Section 1),
+    // Bravo one (Section B), Alpha two (Section 1).
+    const sectionBar = page.locator("section.section-bar");
+    await sectionBar.getByRole("button", { name: "Plan sections" }).click();
+    await sectionBar.getByLabel("New section name").fill("Section B");
+    await sectionBar.getByRole("button", { name: "Add", exact: true }).click();
+    await expect(sectionBar.getByText("2. Section B")).toBeVisible();
+    await sectionBar.getByRole("button", { name: "Done" }).click();
+
+    const prep = panel(page, "Activities");
+    const prepare = async (title: string) => {
+      await prep.getByPlaceholder("Where does the quantity ordered belong?").fill(title);
+      await prep.getByRole("button", { name: "Save for later" }).click();
+      await expect(prep.getByText(title, { exact: true })).toBeVisible();
+    };
+
+    await prepare("Alpha one");
+    await sectionBar.getByRole("button", { name: "Next ▸" }).click();
+    await expect(sectionBar.locator(".section-bar-title")).toHaveText("Section B");
+    await prepare("Bravo one");
+    await sectionBar.getByRole("button", { name: "Plan sections" }).click();
+    await sectionBar
+      .locator("li")
+      .filter({ hasText: "Section 1" })
+      .getByRole("button", { name: "Go here" })
+      .click();
+    await expect(sectionBar.locator(".section-bar-title")).toHaveText("Section 1");
+    await sectionBar.getByRole("button", { name: "Done" }).click();
+    await prepare("Alpha two");
+
+    // The panel groups by section: both Alphas together, whatever order they
+    // were typed in.
+    const titlesInOrder = async () =>
+      (await prep.locator(".activity-row strong").allInnerTexts()).map((t) => t.trim());
+    await expect.poll(titlesInOrder).toEqual(["Alpha one", "Alpha two", "Bravo one"]);
+
+    // One click on the arrow moves Alpha two past the neighbour the instructor
+    // can see — Alpha one — not past Bravo one hidden in the stored order.
+    await prep.getByRole("button", { name: "Move Alpha two earlier" }).click();
+    await expect.poll(titlesInOrder).toEqual(["Alpha two", "Alpha one", "Bravo one"]);
+
+    // The arrows stop at the edges of the displayed section, and a section
+    // with one entry offers no move at all.
+    await expect(prep.getByRole("button", { name: "Move Alpha two earlier" })).toBeDisabled();
+    await expect(prep.getByRole("button", { name: "Move Alpha one later" })).toBeDisabled();
+    await expect(prep.getByRole("button", { name: "Move Bravo one earlier" })).toBeDisabled();
+    await expect(prep.getByRole("button", { name: "Move Bravo one later" })).toBeDisabled();
+
+    // The order is stored, not a trick of the render: it survives a reload.
+    await page.reload();
+    await expect.poll(titlesInOrder).toEqual(["Alpha two", "Alpha one", "Bravo one"]);
+
+    // ...and travels with the plan into a fresh class.
+    const plans = panel(page, "Prepare & reuse");
+    await plans.getByRole("button", { name: "Open" }).click();
+    await plans.getByRole("button", { name: "Save this session as a plan" }).click();
+    await expect(plans.getByText(/Saved as/)).toBeVisible();
+    await plans.getByRole("link", { name: "Start a class from it" }).click();
+    await page.waitForURL(/\?plan=/);
+    await page.getByLabel(/class name/i).fill("Interleaved rerun");
+    await page.getByRole("button", { name: /start class/i }).click();
+    await page.waitForURL(/\/r\/[A-Z0-9]{6}\/host/);
+
+    const rerun = panel(page, "Activities");
+    const rerunTitles = async () =>
+      (await rerun.locator(".activity-row strong").allInnerTexts()).map((t) => t.trim());
+    await expect.poll(rerunTitles).toEqual(["Alpha two", "Alpha one", "Bravo one"]);
+
+    await context.close();
+  });
 });

@@ -91,12 +91,29 @@ export function ActivityPanel({
   );
   if (loose.length > 0) grouped.push({ key: "none", title: "No section", items: loose });
 
-  /** Moves one activity past its neighbour, sending the whole order. */
+  /**
+   * Moves one activity past its visible neighbour, sending the whole order.
+   *
+   * The arrows work on the list as displayed — grouped by section — not on the
+   * stored order. When sections were created in an interleaved order, the
+   * stored neighbour can sit in another group, and swapping with it would
+   * change nothing the instructor can see. So: find the neighbour inside the
+   * same displayed group and exchange the two entries' stored positions. Every
+   * other entry keeps its position, so the other sections' order is untouched.
+   * Moving an activity to a different section is the Edit form's job, not the
+   * arrows'.
+   */
   async function move(activity: ActivityView, direction: -1 | 1) {
+    const group = grouped.find((entry) => entry.items.some((item) => item.id === activity.id));
+    if (!group) return;
+    const at = group.items.findIndex((item) => item.id === activity.id);
+    const neighbour = group.items[at + direction];
+    if (!neighbour) return;
+
     const order = activities.map((entry) => entry.id);
     const from = order.indexOf(activity.id);
-    const to = from + direction;
-    if (to < 0 || to >= order.length) return;
+    const to = order.indexOf(neighbour.id);
+    if (from < 0 || to < 0) return;
     [order[from], order[to]] = [order[to]!, order[from]!];
     await act(`/api/rooms/${code}/activities/reorder`, { order });
   }
@@ -267,7 +284,7 @@ export function ActivityPanel({
       {grouped.map((group) => (
         <div className="stack-sm" key={group.key}>
           {grouped.length > 1 ? <span className="label">{group.title}</span> : null}
-          {group.items.map((activity) => (
+          {group.items.map((activity, index) => (
             <ActivityRow
               key={activity.id}
               code={code}
@@ -277,8 +294,11 @@ export function ActivityPanel({
               act={act}
               onReview={onReview}
               onMove={move}
-              first={activities[0]?.id === activity.id}
-              last={activities[activities.length - 1]?.id === activity.id}
+              // The arrows stop at the edges of the displayed group: the row
+              // above the first entry of a section belongs to another section,
+              // and "move earlier" must never look like "move elsewhere".
+              first={index === 0}
+              last={index === group.items.length - 1}
             />
           ))}
         </div>

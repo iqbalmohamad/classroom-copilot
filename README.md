@@ -53,10 +53,10 @@ upvotes, the pulse at the end, and the picker history. Printable.
 | Ask again | Putting an earlier question to the class again starts a fresh round rather than reopening the old one, so the projector never shows the previous distribution as the new one. |
 | Questions | Anonymous by default. One upvote per learner (a toggle, so tapping can never inflate it). The instructor can mark answered, reopen, or remove. |
 | Participant picker | Uniform random. Learners who have not been picked yet come first; nobody is picked twice in a row while anyone else is available. Session history is kept. |
-| Sections | Optional. Every room starts with "Section 1"; **Next** makes the following one when you need it. Prepare, rename and reorder them before or during class. Moving between sections opens nothing, closes nothing and clears nothing. |
-| Pulse rounds | The pulse belongs to a section and a round. **Ask again** closes the round and opens a fresh one, so the answer before an explanation survives to be compared with the answer after it. Moving to a different section also closes the round: its answers are kept as history, and nothing further is collected against a part of the lesson the class has left. A tap aimed at a closed round is refused, not redirected, and the learner's phone says which section and round it is rating. |
+| Sections | Optional. Every room starts with "Section 1"; **Next** makes the following one when you need it. Prepare, rename and reorder them before or during class. Moving between sections publishes no draft and erases nothing — but it does close the pulse round of the section you leave, keeping its answers as history, so nothing further is collected against a part of the lesson the class is no longer in. |
+| Pulse rounds | The pulse belongs to a section and a round. **Ask again** closes the round and opens a fresh one, so the answer before an explanation survives to be compared with the answer after it. Moving to a different section also closes the round: its answers are kept as history, and nothing further is collected against a part of the lesson the class has left. A tap aimed at a closed round is refused, not redirected — and so is a quick-start tap sent while no round was open, if the class has moved to a different section since that screen loaded. The learner's phone says which section and round it is rating. |
 | Activities | Open-ended exercises: short text, a number, a paragraph, SQL that keeps its formatting, several fields at once, or a choice plus a written explanation. One submission per learner, editable while it is open. **Run again** creates a fresh attempt rather than overwriting the first. |
-| Preparing activities | Every field is editable after writing it — prompt, instructions, section, answer fields, private reference answer, suggested duration — and they are grouped by section and reordered with ↑/↓. That order is what gets run and what a saved plan carries into the next term. The answer fields are the one part that locks once anyone has answered, because changing them would re-attribute submissions to questions nobody was asked. |
+| Preparing activities | Every field is editable after writing it — prompt, instructions, section, answer fields, private reference answer, suggested duration — and they are grouped by section and reordered with ↑/↓. The arrows move an activity within its section, past the neighbour on screen; moving it to a different section is the Edit form's job. That order is what gets run and what a saved plan carries into the next term. The answer fields are the one part that locks once anyone has answered, because changing them would re-attribute submissions to questions nobody was asked. |
 | Review | Named submissions, private per-learner feedback, review states (pending / reviewed / needs follow-up), a filter, and **Invite to explain**, which spotlights the author and records it in the picker's history. |
 | Revealing an answer | One at a time, on the shared screen, anonymous unless the instructor deliberately names the author. |
 | Timers | A stored deadline, so the console, every phone and the projector count down from the same instant and a refresh costs nobody a second. Start, pause, resume, extend, end; optionally close the activity when it runs out. |
@@ -743,13 +743,17 @@ These are real and current, not hypotheticals.
 - **Workers Paid ($5/month) is required.** The Free plan's 50 subrequests per
   invocation and Hyperdrive's 100k queries/day both break under a single class;
   the reasoning and numbers are under Deployment.
-- **Timer expiry is applied on read, not by a scheduler.** There is no cron in
-  this deployment, so a timer's deadline is enforced by the next request that
-  touches the room. In practice that is within a poll interval, because every
-  connected learner phone and the projector are reading constantly — the
+- **Timer expiry is applied by requests, not by a scheduler.** There is no cron
+  in this deployment, so a timer's deadline is enforced by the next request
+  that touches the room — every read, and every write that a deadline could
+  affect, including starting the timer that replaces it. A write settles the
+  expiry first and commits it even when the request itself is refused: a late
+  answer gets its 409 and the closure it was refused under stays in the
+  database. In practice enforcement lands within a poll interval, because
+  every connected learner phone and the projector are reading constantly — the
   instructor's browser does not have to be awake. With literally nobody
-  connected, closure lands on the next read, which is the first moment it can
-  make any difference to anyone.
+  connected, closure lands on the next request, which is the first moment it
+  can make any difference to anyone.
 - **A session plan lives in one browser.** Plans are owned by a token kept in
   the instructor's own `localStorage`, because the product has no accounts.
   Clearing site data loses the list; the plan rows survive but there is no way

@@ -12,14 +12,19 @@ export const dynamic = "force-dynamic";
  * `roundId` is the round their phone believed was open. Sending it lets a tap
  * that was already in flight when the instructor moved on be refused instead of
  * counted against a question the class has not been asked yet.
+ *
+ * `sectionId` is the section their phone was showing, for the tap that carries
+ * no round at all: the first tap of a quick start. Without it, a tap aimed at
+ * section A that lands after the class moved to B would silently open a round
+ * in B and count an opinion of A against it.
  */
 export async function POST(req: Request, ctx: { params: Promise<{ code: string }> }) {
   return handle(async () => {
     const { code } = await ctx.params;
     const room = await loadRoom(code);
     const participant = await requireParticipant(req, room);
-    const { pulse, roundId } = await readJson(req, pulseResponseSchema);
-    const result = await setPulse(room, participant.id, pulse, roundId ?? null);
+    const { pulse, roundId, sectionId } = await readJson(req, pulseResponseSchema);
+    const result = await setPulse(room, participant.id, pulse, roundId ?? null, sectionId);
     return ok({ pulse, roundId: result.roundId });
   });
 }

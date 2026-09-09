@@ -105,6 +105,12 @@ export const pulseResponseSchema = z.object({
    * in the next one.
    */
   roundId: z.string().uuid().nullish(),
+  /**
+   * The section the learner's screen showed. It decides where a tap sent while
+   * no round was open may land: explicit null means the screen showed no
+   * section, absent means an older client that predates the field.
+   */
+  sectionId: z.string().uuid().nullish(),
 });
 
 // --------------------------------------------------------------- activities

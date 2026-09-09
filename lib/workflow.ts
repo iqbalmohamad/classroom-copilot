@@ -465,38 +465,48 @@ export async function submitActivityResponse(
 ): Promise<{ answers: Record<string, string> }> {
   assertRoomOpen(room);
 
-  return sql.begin(async (tx) => {
-    // Participants before rooms — see the lock-order note in service.ts. It has
-    // to come before the enforcement below, which reaches `rooms` through the
-    // version triggers on timers and activities.
-    await tx`update participants set last_seen_at = now() where id = ${participantId}`;
+  const outcome = await sql.begin(
+    async (tx): Promise<{ answers: Record<string, string> } | Refusal> => {
+      // Participants before timers/rooms — see the lock-order note in
+      // service.ts. It has to come before the enforcement below, which reaches
+      // `rooms` through the version triggers on timers and activities.
+      await tx`update participants set last_seen_at = now() where id = ${participantId}`;
 
-    // Apply any elapsed deadline first, in this transaction. Without it the
-    // status read below is only as fresh as the last snapshot anyone happened
-    // to build, and an answer arriving a minute after the bell would be
-    // accepted purely because nobody had looked at the room since.
-    await enforceTimersIn(tx, room.id);
+      // Apply any elapsed deadline first, in this transaction. Without it the
+      // status read below is only as fresh as the last snapshot anyone happened
+      // to build, and an answer arriving a minute after the bell would be
+      // accepted purely because nobody had looked at the room since.
+      await enforceTimersIn(tx, room.id);
 
-    const rows = await tx<{ status: string; fields: unknown }[]>`
-      select status, fields from activities
-      where id = ${activityId} and room_id = ${room.id} for share`;
-    const activity = rows[0];
-    if (!activity) throw new ApiError("not_found", "That activity is no longer available.");
-    if (activity.status !== "open") {
-      throw new ApiError("conflict", "This activity is closed. Your answer was not recorded.");
-    }
+      const rows = await tx<{ status: string; fields: unknown }[]>`
+        select status, fields from activities
+        where id = ${activityId} and room_id = ${room.id} for share`;
+      const activity = rows[0];
+      // Refusals are returned, not thrown: the enforcement above must commit
+      // whether or not this particular answer is taken. The first version threw
+      // here, and the 409 for "closed" rolled back the closure it described.
+      if (!activity) {
+        return { refuse: "not_found", message: "That activity is no longer available." };
+      }
+      if (activity.status !== "open") {
+        return { refuse: "conflict", message: "This activity is closed. Your answer was not recorded." };
+      }
 
-    const check = validateAnswers(parseFields(activity.fields), rawAnswers);
-    if (!check.ok) throw new ApiError("bad_request", check.reason);
+      const check = validateAnswers(parseFields(activity.fields), rawAnswers);
+      if (!check.ok) return { refuse: "bad_request", message: check.reason };
 
-    await tx`
-      insert into activity_responses (activity_id, participant_id, room_id, answers)
-      values (${activityId}, ${participantId}, ${room.id}, ${sql.json(check.answers as never)})
-      on conflict (activity_id, participant_id)
-      do update set answers = excluded.answers, updated_at = now()`;
+      await tx`
+        insert into activity_responses (activity_id, participant_id, room_id, answers)
+        values (${activityId}, ${participantId}, ${room.id}, ${sql.json(check.answers as never)})
+        on conflict (activity_id, participant_id)
+        do update set answers = excluded.answers, updated_at = now()`;
 
-    return { answers: check.answers };
-  });
+      return { answers: check.answers };
+    },
+  );
+
+  if (isRefusal(outcome)) throw new ApiError(outcome.refuse, outcome.message);
+  return outcome;
 }
 
 /**
@@ -569,6 +579,25 @@ export async function reviewResponse(
 // ------------------------------------------------------------------ timers
 
 /**
+ * A refusal decided inside a transaction that must still commit.
+ *
+ * Throwing ApiError from inside sql.begin aborts the transaction — which is
+ * right for validation, and exactly wrong once enforceTimersIn has run: the
+ * 409 telling a learner "this activity is closed" would roll back the very
+ * closure it is reporting, leaving the deadline to be re-applied by whoever
+ * writes next. Paths that enforce deadlines therefore return one of these,
+ * commit, and throw only after the transaction is durable.
+ */
+interface Refusal {
+  refuse: "not_found" | "conflict" | "bad_request";
+  message: string;
+}
+
+function isRefusal(value: unknown): value is Refusal {
+  return typeof value === "object" && value !== null && "refuse" in value;
+}
+
+/**
  * Close out timers whose deadline has passed, inside the caller's transaction.
  *
  * The deadline is enforced here, at the write boundary, not by a scheduler and
@@ -611,13 +640,23 @@ export async function enforceTimers(roomId: string): Promise<void> {
 export async function startTimer(room: RoomRow, input: StartTimerInput): Promise<{ id: string }> {
   assertRoomOpen(room);
 
-  return sql.begin(async (tx) => {
+  const outcome = await sql.begin(async (tx): Promise<{ id: string } | Refusal> => {
     await lockRoom(tx, room.id);
+
+    // Settle any elapsed deadline before replacing the clock. The blanket
+    // "end everything live" below would otherwise mark an expired auto-close
+    // timer as merely ended, without ever closing its activity — starting a
+    // break timer straight after the bell would quietly reopen the exercise
+    // the class had just been told was over.
+    await enforceTimersIn(tx, room.id);
 
     if (input.activityId) {
       const owns = await tx<{ id: string }[]>`
         select id from activities where id = ${input.activityId} and room_id = ${room.id}`;
-      if (!owns[0]) throw new ApiError("bad_request", "That activity is not part of this class.");
+      if (!owns[0]) {
+        // Returned, not thrown, so the settlement above commits regardless.
+        return { refuse: "bad_request", message: "That activity is not part of this class." };
+      }
     }
 
     // One clock at a time. Two countdowns on a projector is a bug the class
@@ -639,6 +678,9 @@ export async function startTimer(room: RoomRow, input: StartTimerInput): Promise
     });
     return { id: rows[0]!.id };
   });
+
+  if (isRefusal(outcome)) throw new ApiError(outcome.refuse, outcome.message);
+  return outcome;
 }
 
 export async function actOnTimer(
@@ -647,10 +689,12 @@ export async function actOnTimer(
   action: "pause" | "resume" | "extend" | "end",
   seconds?: number,
 ): Promise<void> {
-  await sql.begin(async (tx) => {
+  const outcome = await sql.begin(async (tx): Promise<true | Refusal> => {
     // The clock may have run out since the console last rendered. Settle that
     // first, so pause/resume/extend act on what the timer actually is rather
-    // than on what the instructor's screen last showed.
+    // than on what the instructor's screen last showed. Every refusal below is
+    // returned rather than thrown, so this settlement commits either way —
+    // "that timer has finished" must not resurrect the timer it is describing.
     await enforceTimersIn(tx, room.id);
 
     const rows = await tx<
@@ -666,21 +710,24 @@ export async function actOnTimer(
       select id, status, ends_at, remaining_seconds, activity_id, auto_close
       from timers where id = ${timerId} and room_id = ${room.id} for update`;
     const timer = rows[0];
-    if (!timer) throw new ApiError("not_found", "That timer no longer exists.");
+    if (!timer) return { refuse: "not_found", message: "That timer no longer exists." };
 
     if (timer.status === "ended") {
       // Extending a finished timer would quietly reopen submissions the class
       // has already been told are closed. Say so, and make starting a new one
       // the deliberate act it should be.
-      throw new ApiError(
-        "conflict",
-        "That timer has finished. Start a new one — and reopen the activity yourself if you " +
+      return {
+        refuse: "conflict",
+        message:
+          "That timer has finished. Start a new one — and reopen the activity yourself if you " +
           "want more answers.",
-      );
+      };
     }
 
     if (action === "pause") {
-      if (timer.status !== "running") throw new ApiError("conflict", "That timer is not running.");
+      if (timer.status !== "running") {
+        return { refuse: "conflict", message: "That timer is not running." };
+      }
       await tx`
         update timers
         set status = 'paused',
@@ -688,7 +735,9 @@ export async function actOnTimer(
             ends_at = null
         where id = ${timerId}`;
     } else if (action === "resume") {
-      if (timer.status !== "paused") throw new ApiError("conflict", "That timer is not paused.");
+      if (timer.status !== "paused") {
+        return { refuse: "conflict", message: "That timer is not paused." };
+      }
       await tx`
         update timers
         set status = 'running',
@@ -718,7 +767,10 @@ export async function actOnTimer(
     }
 
     await logEvent(tx, room.id, `timer_${action}`, { timerId });
+    return true;
   });
+
+  if (isRefusal(outcome)) throw new ApiError(outcome.refuse, outcome.message);
 }
 
 // --------------------------------------------------------------- materials

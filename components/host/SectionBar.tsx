@@ -74,8 +74,8 @@ export function SectionBar({
         <div className="stack-sm" style={{ marginTop: 12 }}>
           <p className="tiny muted" style={{ margin: 0 }}>
             Optional. Without any of this the class runs in Section 1, and Next makes Section 2 when
-            you need it. Moving between sections never opens a draft or clears what a section
-            collected.
+            you need it. Moving on never publishes a draft or erases anything; the pulse round of
+            the section you leave is closed and kept as history.
           </p>
 
           <ul className="list">

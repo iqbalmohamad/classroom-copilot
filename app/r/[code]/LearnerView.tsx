@@ -233,6 +233,8 @@ function LearnerRoom({ code, onLeave }: { code: string; onLeave: () => void }) {
         code={code}
         current={snapshot.me.pulse}
         round={snapshot.pulseRound}
+        sectionId={snapshot.room.currentSectionId}
+        sectionTitle={snapshot.room.currentSectionTitle}
         disabled={ended}
         onError={flash}
         onDone={refresh}
@@ -393,6 +395,8 @@ function PulseCard({
   code,
   current,
   round,
+  sectionId,
+  sectionTitle,
   disabled,
   onError,
   onDone,
@@ -401,6 +405,10 @@ function PulseCard({
   current: PulseValue | null;
   /** The round this phone believes is collecting, and what it is about. */
   round: LearnerSnapshot["pulseRound"];
+  /** The section this phone believes the class is in — the context a tap sent
+   *  while no round is open would be rating. */
+  sectionId: string | null;
+  sectionTitle: string | null;
   disabled: boolean;
   onError: (message: string) => void;
   onDone: () => void;
@@ -412,16 +420,22 @@ function PulseCard({
     setBusy(true);
     try {
       // Sending the round back is what stops a tap that was already in flight
-      // from being counted against a question the class has not been asked yet.
+      // from being counted against a question the class has not been asked
+      // yet; the section covers the tap that carried no round at all, so a
+      // quick-start tap cannot open a round for a section this screen never
+      // showed.
       await api(`/api/rooms/${code}/pulse`, {
         method: "POST",
-        body: { pulse, roundId: round?.id ?? null },
+        body: { pulse, roundId: round?.id ?? null, sectionId },
         code,
         role: "learner",
       });
       onDone();
     } catch (err) {
       onError(err instanceof ApiRequestError ? err.message : "Could not update.");
+      // The tap was refused because this screen was behind. Refetch so the
+      // next tap is about what the class is actually looking at.
+      onDone();
     } finally {
       setBusy(false);
     }
@@ -438,7 +452,7 @@ function PulseCard({
       <p className="tiny muted" style={{ margin: 0 }}>
         {round
           ? `About ${round.sectionTitle ?? "this class"} · ${round.label ?? `Round ${round.seq}`}`
-          : "Tap whenever you like — it starts a new round for wherever the class is now."}
+          : `Tap whenever you like — it starts a new round for ${sectionTitle ?? "this class"}.`}
       </p>
       <div className="pulse-grid">
         {PULSE_VALUES.map((value) => (
