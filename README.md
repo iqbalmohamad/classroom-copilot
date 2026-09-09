@@ -99,7 +99,8 @@ Requires Node 20.9+ and a PostgreSQL 14+ server.
 ```bash
 git clone https://github.com/iqbalmohamad/classroom-copilot.git
 cd classroom-copilot
-npm install
+git checkout claude/m0-first-classroom-4lbk0i   # the application lives here
+npm ci
 
 cp .env.example .env.local        # then edit DATABASE_URL
 createdb classroom_copilot        # or use an existing database
@@ -107,6 +108,10 @@ npm run db:migrate
 
 npm run dev                       # http://localhost:3000
 ```
+
+`main` still holds only the original brief; every command below assumes the
+branch above. `npm ci` rather than `npm install` because the lockfile is what
+was tested.
 
 Open `http://localhost:3000`, click **Start class**, and open the join link in
 a second browser (or a phone on the same network) to see both sides.
@@ -285,9 +290,87 @@ those onto a much smaller origin pool.
    npm run cf:deploy
    ```
 
-`npm run cf:check` refuses to pass while the Hyperdrive id is a placeholder,
-`nodejs_compat` is missing, `.dev.vars` is tracked by git, or wrangler is not
-logged in.
+`npm run cf:check` exits nonzero while the Hyperdrive id is a placeholder,
+`nodejs_compat` is missing, `.dev.vars` is tracked by git, wrangler is not
+logged in, or Hyperdrive caching is on.
+
+It also exits nonzero when a check **could not be run** — no network, no
+wrangler, an unreadable answer — and says so as `UNKNOWN` rather than `warn`.
+An unverified login is not a working login, and unverified caching is the
+failure that breaks a class silently, so neither is allowed to pass as a note
+in the margin. Only the last line, *"All checks verified"*, means ready.
+
+### Deploying from Windows (PowerShell)
+
+The same four steps, spelled out for PowerShell and starting from nothing. Run
+them in order; each one is a separate command.
+
+```powershell
+# 1. Get the code. The application is on the branch, not on main.
+git clone https://github.com/iqbalmohamad/classroom-copilot.git
+cd classroom-copilot
+git checkout claude/m0-first-classroom-4lbk0i
+npm ci
+```
+
+```powershell
+# 2. Migrate the Supabase database, once.
+#    Read-Host keeps the connection string out of your shell history.
+$env:DATABASE_URL = Read-Host "Supabase connection string"
+npm run db:migrate
+Remove-Item Env:DATABASE_URL
+```
+
+```powershell
+# 3. Log in to Cloudflare and create the Hyperdrive configuration.
+npx wrangler login
+$cs = Read-Host "Supabase connection string"
+npx wrangler hyperdrive create classroom-copilot-db --connection-string="$cs" --caching-disabled
+Remove-Variable cs
+```
+Copy the `id` it prints into `wrangler.jsonc`, replacing
+`REPLACE_WITH_HYPERDRIVE_ID`. `--caching-disabled` is mandatory — see step 2 of
+**Steps** above for why.
+
+```powershell
+# 4. Check, then deploy.
+npm run cf:check          # must print "All checks verified"
+npm run cf:deploy
+```
+
+`npm run cf:deploy` prints the `*.workers.dev` hostname. Put it in the `vars`
+block of `wrangler.jsonc` as `APP_ORIGIN`, then run `npm run cf:deploy` once
+more so join URLs and the QR code are built from it rather than from request
+headers.
+
+**What is and is not verified on Windows.** Every command above is Node or
+PowerShell only — no Unix shell, no inline `VAR=value` prefixes, and the
+pre-deployment check runs wrangler through `node node_modules/wrangler/bin/wrangler.js`
+rather than `npx`, which fails with `ENOENT` on Windows because `npx` is
+`npx.cmd`. That said, none of it has been *run* on a Windows machine from here;
+the verification in this repository was done on Linux with Node 22.
+
+If any step above misbehaves on Windows, use the path that was actually
+verified — Ubuntu under WSL 2, which is the same environment the whole suite
+was tested in:
+
+```powershell
+wsl --install -d Ubuntu     # once, then reboot and open "Ubuntu"
+```
+```bash
+# inside the Ubuntu shell
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs
+git clone https://github.com/iqbalmohamad/classroom-copilot.git
+cd classroom-copilot && git checkout claude/m0-first-classroom-4lbk0i && npm ci
+npx wrangler login          # opens the Windows browser
+npm run cf:check && npm run cf:deploy
+```
+Clone inside the Linux filesystem (`~/classroom-copilot`), not under `/mnt/c`:
+npm on the mounted Windows drive is slow enough to look broken.
+
+One thing genuinely requires Linux or WSL: `npm run test:workers`, the local
+Workers test harness, is a bash script that uses `setsid`, `fuser` and `pkill`.
+It is a development tool, not part of deploying.
 
 ### Local development against the Workers runtime
 
@@ -325,6 +408,27 @@ clock waiting on the database rather than executing.
 `CC_STREAM_POLL_MS` is the dial: 1000ms is set in `wrangler.jsonc` and more than
 halves the query volume against the Node default, at a measured cost of roughly
 550ms rather than 120ms for an update to reach every phone.
+
+### Verifying the production URL
+
+Ten minutes, once the deploy is live and before the class. Everything here is
+manual on purpose: the automated suites run against a local runtime, and the
+things that only exist in production — real Hyperdrive, real TLS, real phones —
+are exactly what they cannot cover.
+
+| # | Check | How | Pass |
+| --- | --- | --- | --- |
+| 1 | Real Hyperdrive/Supabase | Start a class on the production URL, then look for the room in Supabase | The row is there |
+| 2 | Caching off | `npx wrangler hyperdrive get <id>` | `"disabled": true` |
+| 3 | M0 flow, no AI | Poll → answer → reveal → close, pulse, question + upvote, pick, summary | All work; no AI panel |
+| 4 | Realtime | Instructor opens a poll; a learner phone is watched | Appears in ~1s, untouched |
+| 5 | Reconnect | Leave a learner idle 2 min, lock the phone, unlock | Still live, correct state |
+| 6 | Refresh | Reload instructor and learner mid-poll | Same room, same answer, no re-join |
+| 7 | Desktop instructor | Instructor view on the teaching laptop | Readable at the back of the room |
+| 8 | Public view | `/r/<code>/public` on the projector | No roster, no names, no individual answers |
+| 9 | Physical phone | One iOS and one Android, on mobile data, not Wi-Fi | Join by QR, answer, ask a question |
+
+Item 9 is the one no amount of local testing substitutes for.
 
 **Production URL:** _not yet deployed — see "Known limitations"._
 
@@ -434,6 +538,9 @@ lib/
   auth.ts                         the two token types and how they are checked
   client/useRoomState.ts          realtime transport and fallback
 db/migrations/                    schema
+scripts/
+  preflight/checks.ts             what makes a deploy ready, as pure functions
+  cf-preflight.ts                 runs those checks (npm run cf:check)
 tests/, e2e/                      see Testing above
 ```
 

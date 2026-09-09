@@ -28,8 +28,13 @@
   //
   // Create it with:
   //   npx wrangler hyperdrive create classroom-copilot-db \
-  //     --connection-string="postgresql://...supabase..."
+  //     --connection-string="postgresql://USER:PASSWORD@HOST:5432/postgres" \
+  //     --caching-disabled
   // then paste the returned id below.
+  //
+  // --caching-disabled is not optional either. Hyperdrive caches SQL responses
+  // by default, and realtime here is a counter re-read about once a second: a
+  // cached read leaves the whole class on the previous question, silently.
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",
