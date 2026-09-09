@@ -443,6 +443,14 @@ tests/, e2e/                      see Testing above
 
 These are real and current, not hypotheticals.
 
+- **Local `workerd` is the same runtime, but not the same environment.**
+  `wrangler dev --local` runs the real Workers runtime, so the findings that
+  matter — the connection-lifetime rule, the TLS limitation, header and cookie
+  behaviour — are genuine. What it does *not* exercise is Hyperdrive itself:
+  locally the binding is emulated by a direct connection to Postgres, so real
+  TLS termination to Supabase, real origin pooling and real network latency are
+  still unverified. That is the largest remaining unknown, and the first thing
+  to check after the first deploy.
 - **No production deployment yet.** The app is verified against the real
   Cloudflare Workers runtime locally — the full suite plus a class-scale load
   test and a stream-cycling soak all run on `workerd` — but no hosted instance
