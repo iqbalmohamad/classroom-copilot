@@ -3,11 +3,11 @@ import postgres from "postgres";
 import { config } from "dotenv";
 
 /**
- * Prepares the browser suite: its own database, migrated, against a fresh build.
+ * Prepares the browser suite's own database, migrated.
  *
- * Without this a clone would fail on a missing database, and — worse — the suite
- * would happily run against whatever was last compiled into .next, which is the
- * kind of green run that means nothing.
+ * Without this a clone would fail on a missing database. The build belongs to
+ * the web server command instead: Playwright starts that before this file runs,
+ * so building here would serve the previous revision.
  */
 config({ path: ".env.local" });
 config({ path: ".env" });
@@ -35,8 +35,4 @@ export default async function globalSetup() {
     stdio: "pipe",
     env: { ...process.env, DATABASE_URL: testUrl },
   });
-
-  if (process.env.CC_SKIP_BUILD !== "1") {
-    execFileSync("npm", ["run", "build"], { stdio: "inherit" });
-  }
 }

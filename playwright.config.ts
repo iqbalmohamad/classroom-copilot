@@ -26,9 +26,9 @@ const databaseUrl =
 
 export default defineConfig({
   testDir: "./e2e",
-  // Creates and migrates the suite's own database, and rebuilds, so a green run
-  // always reflects the code in the working tree. Skipped when testing an
-  // external server, which brings its own.
+  // Creates and migrates the suite's own database. Skipped when testing an
+  // external server, which brings its own. The build lives in the webServer
+  // command, which Playwright starts before this runs.
   globalSetup: EXTERNAL ? undefined : "./e2e/global-setup.ts",
   timeout: 90_000,
   expect: { timeout: 15_000 },
@@ -47,11 +47,13 @@ export default defineConfig({
   webServer: EXTERNAL
     ? undefined
     : {
-    command: `node node_modules/next/dist/bin/next start -p ${PORT}`,
+    // Builds first — see e2e/serve.mjs for why that cannot live in globalSetup.
+    command: `node e2e/serve.mjs`,
     url: BASE_URL,
     reuseExistingServer: false,
-    timeout: 120_000,
+    timeout: 240_000,
     env: {
+      CC_E2E_PORT: String(PORT),
       DATABASE_URL: databaseUrl,
       APP_ORIGIN: BASE_URL,
       NODE_ENV: "production",
