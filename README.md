@@ -54,13 +54,15 @@ upvotes, the pulse at the end, and the picker history. Printable.
 | Questions | Anonymous by default. One upvote per learner (a toggle, so tapping can never inflate it). The instructor can mark answered, reopen, or remove. |
 | Participant picker | Uniform random. Learners who have not been picked yet come first; nobody is picked twice in a row while anyone else is available. Session history is kept. |
 | Sections | Optional. Every room starts with "Section 1"; **Next** makes the following one when you need it. Prepare, rename and reorder them before or during class. Moving between sections opens nothing, closes nothing and clears nothing. |
-| Pulse rounds | The pulse belongs to a section and a round. **Ask again** closes the round and opens a fresh one, so the answer before an explanation survives to be compared with the answer after it. A tap aimed at a round that has closed is refused, not redirected. |
+| Pulse rounds | The pulse belongs to a section and a round. **Ask again** closes the round and opens a fresh one, so the answer before an explanation survives to be compared with the answer after it. Moving to a different section also closes the round: its answers are kept as history, and nothing further is collected against a part of the lesson the class has left. A tap aimed at a closed round is refused, not redirected, and the learner's phone says which section and round it is rating. |
 | Activities | Open-ended exercises: short text, a number, a paragraph, SQL that keeps its formatting, several fields at once, or a choice plus a written explanation. One submission per learner, editable while it is open. **Run again** creates a fresh attempt rather than overwriting the first. |
+| Preparing activities | Every field is editable after writing it — prompt, instructions, section, answer fields, private reference answer, suggested duration — and they are grouped by section and reordered with ↑/↓. That order is what gets run and what a saved plan carries into the next term. The answer fields are the one part that locks once anyone has answered, because changing them would re-attribute submissions to questions nobody was asked. |
 | Review | Named submissions, private per-learner feedback, review states (pending / reviewed / needs follow-up), a filter, and **Invite to explain**, which spotlights the author and records it in the picker's history. |
 | Revealing an answer | One at a time, on the shared screen, anonymous unless the instructor deliberately names the author. |
 | Timers | A stored deadline, so the console, every phone and the projector count down from the same instant and a refresh costs nobody a second. Start, pause, resume, extend, end; optionally close the activity when it runs out. |
 | Materials | Http/https links only, attached to the session or to a section, pinnable to the top of every phone. |
-| Session plans | Save this room's preparation and start another class from it. Learner data cannot travel in one. |
+| Session plans | Save this room's preparation and start another class from it, or lift a single exercise across. Learner data cannot travel in one. |
+| Earlier classes | Opt-in per class: **Keep this class on this device** stores that class's instructor key in this browser, so it appears under **Your classes** and inside **Prepare & reuse** weeks later. Opening one signs you back in through the same verified link the instructor link uses. Off by default, because a console is often opened on a shared machine. |
 | Session summary | Counts, poll distributions, pulse by section and round, activities with named answers and review status, questions with their context, materials, and picker history. Printable, and downloadable as CSV. |
 | AI Class Read | **Optional and off unless a key is configured.** Reads aggregates only, returns two or three advisory sentences, changes nothing, and fails silently. |
 
@@ -102,7 +104,9 @@ Nothing below is required to teach a whole lesson.
 
 **Next** moves the class on; it never publishes a draft or clears a result.
 **Ask again** starts a fresh pulse round and keeps the previous one readable
-underneath, which is how a before-and-after comparison works. A timer's deadline
+underneath, which is how a before-and-after comparison works. Moving sections
+does the same thing for you, so a round never keeps collecting about a part of
+the lesson the class has left. A timer's deadline
 is stored on the server, so every surface counts down together and closure
 happens on time whether or not the console is awake. **Review** on an activity
 opens the named answers: mark them, write private feedback, put one on the
@@ -110,8 +114,22 @@ shared screen (anonymous unless you name the author), or invite its author to
 talk it through.
 
 Afterwards, **Summary** is printable and has a **Download CSV** for marking.
-Coming back to a previous session needs the instructor cookie or the instructor
-link — a room code alone opens nothing.
+
+### Coming back to an earlier class
+
+Two different things, kept apart on purpose:
+
+* **Reading what a class actually wrote.** Turn on *Keep this class on this
+  device* in the console (next to the instructor link) and it appears under
+  **Your classes** on the home page and under **Prepare & reuse** in any later
+  class, with a direct link to its answers. That is how Day 31 revisits the
+  business questions collected on Day 30.
+* **Asking the same question again.** *Reuse an exercise* copies the prompt into
+  the class you are teaching now and collects fresh answers, leaving the
+  original session untouched.
+
+Either way the instructor key is what opens it. A room code alone opens
+nothing, and the key is stored only when you ask for it.
 
 
 ## Stack
@@ -186,6 +204,7 @@ a second browser (or a phone on the same network) to see both sides.
 | `npm run build` / `npm start` | Production build and server |
 | `npm run typecheck` | TypeScript, no emit |
 | `npm run db:migrate` | Apply pending migrations |
+| `npm run db:cutover-check` | Confirm no class is running before the 0003 cutover, and that none was lost after it |
 | `npm run db:reset` | Drop application tables and re-migrate (local only) |
 | `npm test` | Unit + integration suites |
 | `npm run test:e2e` | Multi-browser Playwright suite |
@@ -204,22 +223,66 @@ of `0001_init.sql`). Running it twice is a no-op.
 | `0001_init.sql` | Rooms, participants, polls, questions, picks, the version trigger, RLS |
 | `0002_participant_references.sql` | Makes a participant deletable without breaking their questions or picks |
 | `0003_classroom_workflow.sql` | Sections, pulse rounds, activities and their answers, timers, materials, question context, session plans |
+| `0004_activity_order.sql` | Makes the activity sequence deferrable, so a reorder can be one statement |
 
-**`0003` is additive and safe to apply to a live database.** It creates new
-tables, adds nullable columns, and widens one CHECK constraint; it drops
-nothing. Its backfill gives every existing room a "Section 1" and moves the
-pulse each learner is currently holding into a first round, so a class in
-progress when it is applied keeps its readout on screen. `participants.pulse` is
-left in place, marked deprecated, as the record of what the pulse was before
-the move.
+### 0003 needs a window with no class in it
 
-No configuration changes are required: there are no new environment variables,
-and no change to `wrangler.jsonc`.
+The schema changes are additive — new tables, nullable columns, one widened
+CHECK, nothing dropped — but **that does not make the deploy safe to do during a
+class**, and the first version of this section wrongly implied it did.
+
+The problem is not the schema, it is that two versions of the application
+disagree about where the pulse lives. 0003 copies `participants.pulse` into
+`pulse_responses`, and the new build stops writing that column. The old build is
+still writing it until the moment the new one is live. Any pulse a learner sets
+between the backfill and the deploy is written to a column nothing reads
+afterwards: it is not corrupted, it is simply invisible, and the class sees
+their answer disappear from the instructor's readout.
+
+There is no way to make the two builds agree, so the cutover is a short window
+rather than a rolling upgrade:
 
 ```bash
-# against the class database, from the machine that holds its credentials
+# 1. Establish that no class is running. Exits nonzero if one is.
+DATABASE_URL='postgresql://...' npm run db:cutover-check
+
+# 2. Migrate.
 DATABASE_URL='postgresql://...' npm run db:migrate
+
+# 3. Deploy immediately — this is the gap that matters, so do not stop here.
+npm run cf:check && npm run cf:deploy
+
+# 4. Confirm nothing was written to the old column in between.
+DATABASE_URL='postgresql://...' npm run db:cutover-check --after
 ```
+
+Step 4 is the verification, not a formality: it reports any learner whose pulse
+was written to the deprecated column after the migration timestamp, which is
+exactly the loss the window exists to prevent. If it finds any, those learners
+tap again on the new build — there is deliberately no automatic reconciliation,
+because a stale column value carries no round, and guessing one would file an
+answer under the wrong section.
+
+`0004` has none of this: it changes one constraint's timing and can be applied
+whenever.
+
+### Rolling back
+
+Once the new build has run, rollback is not symmetrical.
+
+- **Rolling back the application** (redeploying the previous build) is
+  survivable and loses no rows. Pulse writes go back to `participants.pulse`,
+  and everything created since — sections, pulse rounds, activities and their
+  submissions, feedback, timers, materials, plans — stops being visible while
+  staying in the database. Two rough edges: pulse recorded since the cutover
+  will not appear, and a room left with `public_mode` of `activity` or
+  `response` shows the old build's join screen, since those values postdate it.
+- **Rolling back the migration** is a data-loss operation and there is no down
+  script on purpose. Dropping the 0003 tables discards every activity
+  submission, every piece of feedback and every pulse round recorded since the
+  cutover. If it ever has to happen, export first: `GET
+  /api/rooms/<code>/summary?format=csv` for each affected class, which contains
+  the named submissions and the pulse rounds in full.
 
 ## Environment variables
 
