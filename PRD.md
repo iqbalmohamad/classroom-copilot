@@ -1,3 +1,18 @@
+> **Scope note — classroom workflow expansion (September 2026).**
+>
+> This PRD describes M0, the live classroom. The product has since been extended,
+> at the Product Owner's request, to support the way a session is actually
+> taught: optional sections, pulse rounds with preserved history, open-ended
+> activities with instructor review and private feedback, activity and break
+> timers, shared materials, questions carrying the context they were asked in,
+> reusable session plans, and a summary and CSV export covering all of it.
+>
+> Where a "not in M0" item below appears to exclude one of those, the expansion
+> takes precedence — it was requested deliberately and after M0 shipped. The
+> exclusions that still stand are listed under **Scope** in `README.md`: no
+> accounts, no LMS, no SQL execution engine, no automated grading, no chat or
+> video, and no AI that acts on the classroom.
+
 # Classroom Copilot — Product Requirements Document
 
 **Status:** Draft v0.1  

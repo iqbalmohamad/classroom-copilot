@@ -1,0 +1,1034 @@
+/*
+ * Classroom Copilot design tokens.
+ *
+ * Three surfaces with different constraints share this sheet:
+ *   - the instructor console, read at arm's length while teaching;
+ *   - the learner view, used one-handed on a phone;
+ *   - the public view, read from the back of a room through a screen share.
+ *
+ * Everything here is tuned for legibility first: high contrast, generous touch
+ * targets, no decorative motion. Light-only by design — a projector or a shared
+ * screen in a bright room is the worst place to discover a dark theme.
+ */
+
+:root {
+  --bg: #ffffff;
+  --surface: #f6f7f9;
+  --surface-2: #eef1f5;
+  --ink: #12151a;
+  --ink-muted: #5b6472;
+  --ink-faint: #8b95a3;
+  --border: #dde2e9;
+  --border-strong: #c3cad5;
+
+  --accent: #2f56d3;
+  --accent-ink: #ffffff;
+  --accent-soft: #eaeffc;
+  --accent-border: #b9c8f2;
+
+  --ok: #0f7a58;
+  --ok-soft: #e6f5ef;
+  --warn: #9a6207;
+  --warn-soft: #fdf2e0;
+  --bad: #b5262c;
+  --bad-soft: #fdeceb;
+
+  --radius: 10px;
+  --radius-lg: 16px;
+  --shadow: 0 1px 2px rgba(18, 21, 26, 0.06), 0 4px 14px rgba(18, 21, 26, 0.05);
+
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, "Noto Sans", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow-wrap: break-word;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+p {
+  margin: 0;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ------------------------------------------------------------- layout */
+
+.page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 20px 16px 64px;
+}
+
+.page-narrow {
+  max-width: 520px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.stack-sm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.console-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .console-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* -------------------------------------------------------------- cards */
+
+.card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  box-shadow: var(--shadow);
+}
+
+.card-tight {
+  padding: 14px;
+}
+
+.card-title {
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  margin-bottom: 12px;
+}
+
+.muted {
+  color: var(--ink-muted);
+}
+
+.faint {
+  color: var(--ink-faint);
+}
+
+.small {
+  font-size: 14px;
+}
+
+.tiny {
+  font-size: 12.5px;
+}
+
+.empty {
+  color: var(--ink-muted);
+  font-size: 14.5px;
+  padding: 14px 0;
+}
+
+/* ------------------------------------------------------------ buttons */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+  /* Links styled as buttons should not also be underlined. */
+  text-decoration: none;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #2547b5;
+  border-color: #2547b5;
+}
+
+.btn-danger {
+  color: var(--bad);
+  border-color: #e6b9b9;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--bad-soft);
+}
+
+.btn-lg {
+  min-height: 56px;
+  font-size: 17px;
+  padding: 12px 22px;
+}
+
+.btn-block {
+  width: 100%;
+}
+
+.btn-sm {
+  min-height: 36px;
+  font-size: 14px;
+  padding: 6px 12px;
+}
+
+.btn-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ------------------------------------------------------------- inputs */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+.input,
+.textarea,
+.select {
+  width: 100%;
+  min-height: 48px;
+  padding: 11px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-size: 16px; /* 16px stops iOS Safari zooming on focus */
+}
+
+.textarea {
+  min-height: 92px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.input-code {
+  font-family: var(--mono);
+  font-size: 26px;
+  letter-spacing: 0.22em;
+  text-align: center;
+  text-transform: uppercase;
+  min-height: 62px;
+  font-weight: 600;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.checkbox input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+}
+
+/* -------------------------------------------------------------- chips */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 650;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.chip-live {
+  background: var(--ok-soft);
+  border-color: #b9e0d0;
+  color: var(--ok);
+}
+
+.chip-warn {
+  background: var(--warn-soft);
+  border-color: #ecd5a8;
+  color: var(--warn);
+}
+
+.chip-bad {
+  background: var(--bad-soft);
+  border-color: #eebcbb;
+  color: var(--bad);
+}
+
+.chip-accent {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+/* --------------------------------------------------------- room code */
+
+.code-display {
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  font-size: 30px;
+  line-height: 1.1;
+}
+
+.join-url {
+  font-family: var(--mono);
+  font-size: 13.5px;
+  color: var(--ink-muted);
+  word-break: break-all;
+}
+
+/* ------------------------------------------------------------ results */
+
+.bar-row {
+  display: grid;
+  grid-template-columns: minmax(72px, auto) 1fr minmax(64px, auto);
+  gap: 12px;
+  align-items: center;
+  padding: 7px 0;
+}
+
+.bar-label {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.bar-track {
+  display: block;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.bar-fill {
+  /* The track is a grid item and so is blockified, but this fill is not:
+     without an explicit display it stays inline and its width is ignored. */
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.25s ease;
+}
+
+.bar-fill-ok {
+  background: var(--ok);
+}
+.bar-fill-warn {
+  background: var(--warn);
+}
+.bar-fill-bad {
+  background: var(--bad);
+}
+
+.bar-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  font-size: 15px;
+}
+
+/* --------------------------------------------------------------- misc */
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
+}
+
+.stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+
+.stat-value {
+  font-size: 26px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+
+.stat-label {
+  font-size: 12.5px;
+  color: var(--ink-muted);
+  margin-top: 2px;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.list > li {
+  padding: 11px 0;
+  border-top: 1px solid var(--border);
+}
+
+.list > li:first-child {
+  border-top: none;
+}
+
+.scroll-y {
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.notice {
+  border-radius: var(--radius);
+  padding: 11px 13px;
+  font-size: 14.5px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.notice-error {
+  border-color: #eebcbb;
+  background: var(--bad-soft);
+  color: #7d1c20;
+}
+
+.notice-ok {
+  border-color: #b9e0d0;
+  background: var(--ok-soft);
+  color: #0b5c42;
+}
+
+/* ------------------------------------------- sections, activities, timers */
+
+.section-bar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+}
+
+.section-bar-title {
+  font-size: 17px;
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * The countdown reads from across a room, so it is a chip rather than body
+ * text, and the digits are tabular: a timer whose width jumps every second is
+ * the kind of movement a class watches instead of the lesson.
+ */
+.timer-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-soft);
+  white-space: nowrap;
+}
+
+.timer-chip-label {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.timer-chip-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.timer-chip-urgent {
+  border-color: #eebcbb;
+  background: var(--bad-soft);
+  color: #7d1c20;
+}
+
+.timer-chip-lg {
+  padding: 8px 16px;
+}
+
+.timer-chip-lg .timer-chip-value {
+  font-size: clamp(20px, 3vw, 34px);
+}
+
+.activity-row {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.response-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/*
+ * Pasted SQL has to survive being read back: indentation is meaningful, and a
+ * long line must scroll inside its own box rather than widening the page on a
+ * phone.
+ */
+.answer-pre,
+.textarea-code {
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+
+.answer-pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  overflow-x: auto;
+}
+
+.textarea-code {
+  min-height: 120px;
+}
+
+.material-link {
+  font-weight: 600;
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
+.public-section {
+  color: var(--ink-muted);
+  font-weight: 500;
+}
+
+.public-field-label {
+  font-size: clamp(14px, 1.6vw, 20px);
+  color: var(--ink-muted);
+  margin: 12px 0 4px;
+}
+
+.public-pre {
+  font-family: var(--mono);
+  font-size: clamp(14px, 1.8vw, 24px);
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin: 0;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+/* -------------------------------------------- presentation screen panel */
+
+.subhead {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+/*
+ * The instructor cannot see the tab they are sharing, so the console has to
+ * state what is on it. Given a tinted box of its own it reads at a glance from
+ * across the desk, which is the distance this is used from.
+ */
+.screen-status {
+  border: 1px solid var(--accent-border);
+  background: var(--accent-soft);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.screen-status-label {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.screen-status-value {
+  display: block;
+  font-size: 17px;
+  font-weight: 650;
+  color: var(--ink);
+  margin-top: 2px;
+}
+
+.divider {
+  height: 1px;
+  background: var(--border);
+  border: none;
+  margin: 4px 0;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------- learner view */
+
+.learner-shell {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 16px 16px 40px;
+}
+
+.pulse-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.pulse-btn {
+  min-height: 76px;
+  border-radius: var(--radius);
+  border: 2px solid var(--border-strong);
+  background: var(--bg);
+  font-weight: 650;
+  font-size: 15px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 8px 4px;
+  text-align: center;
+}
+
+.pulse-btn[data-active="true"][data-value="got_it"] {
+  background: var(--ok-soft);
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.pulse-btn[data-active="true"][data-value="shaky"] {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.pulse-btn[data-active="true"][data-value="lost"] {
+  background: var(--bad-soft);
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+.answer-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.answer-btn {
+  min-height: 60px;
+  border-radius: var(--radius);
+  border: 2px solid var(--border-strong);
+  background: var(--bg);
+  font-size: 17px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.answer-btn[data-selected="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: #1f3ea8;
+}
+
+.answer-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.answer-tick {
+  margin-left: auto;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.confidence-grid {
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.confidence-grid .answer-btn {
+  justify-content: center;
+  padding: 12px 4px;
+  font-size: 20px;
+}
+
+.spotlight-banner {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  font-weight: 650;
+  font-size: 17px;
+  text-align: center;
+}
+
+.question-item {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.vote-btn {
+  flex: none;
+  min-width: 58px;
+  min-height: 52px;
+  border-radius: var(--radius);
+  border: 2px solid var(--border-strong);
+  background: var(--bg);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.1;
+  font-weight: 700;
+}
+
+.vote-btn[data-voted="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.vote-count {
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+.vote-caption {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.question-body {
+  font-size: 15.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.answered {
+  opacity: 0.6;
+}
+
+.answered .question-body {
+  text-decoration: line-through;
+}
+
+/* -------------------------------------------------------- public view */
+
+.public-shell {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding: 32px clamp(20px, 4vw, 64px) 28px;
+  gap: 24px;
+}
+
+.public-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 16px;
+}
+
+.public-title {
+  font-size: clamp(20px, 2.4vw, 30px);
+  font-weight: 650;
+}
+
+.public-code {
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  font-size: clamp(24px, 3vw, 40px);
+}
+
+.public-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: clamp(16px, 3vh, 40px);
+}
+
+.public-question {
+  font-size: clamp(30px, 5.2vw, 68px);
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.public-option {
+  font-size: clamp(20px, 2.6vw, 34px);
+  font-weight: 600;
+  padding: 10px 0;
+  display: flex;
+  gap: 18px;
+  align-items: baseline;
+}
+
+.public-bar-row {
+  display: grid;
+  grid-template-columns: minmax(90px, auto) 1fr minmax(110px, auto);
+  gap: clamp(12px, 2vw, 28px);
+  align-items: center;
+  padding: clamp(6px, 1.2vh, 14px) 0;
+}
+
+.public-bar-label {
+  font-size: clamp(20px, 2.4vw, 34px);
+  font-weight: 650;
+}
+
+.public-bar-track {
+  display: block;
+  height: clamp(22px, 3.4vh, 42px);
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.public-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+.public-bar-value {
+  font-size: clamp(20px, 2.4vw, 34px);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.public-join {
+  display: flex;
+  gap: clamp(24px, 5vw, 72px);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.public-join-code {
+  font-family: var(--mono);
+  font-size: clamp(56px, 12vw, 150px);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  line-height: 1;
+}
+
+.public-join-url {
+  font-size: clamp(18px, 2.2vw, 32px);
+  color: var(--ink-muted);
+  word-break: break-all;
+}
+
+.public-qr {
+  background: #fff;
+  padding: 14px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  flex: none;
+}
+
+.public-qr img {
+  display: block;
+  width: clamp(150px, 22vw, 280px);
+  height: auto;
+}
+
+.public-pick {
+  font-size: clamp(44px, 9vw, 120px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+
+.public-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  color: var(--ink-muted);
+  font-size: clamp(14px, 1.4vw, 20px);
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  flex-wrap: wrap;
+}
+
+.public-waiting {
+  font-size: clamp(26px, 4vw, 52px);
+  font-weight: 600;
+  color: var(--ink-muted);
+  text-align: center;
+}
+
+/* ------------------------------------------------------------- print */
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    font-size: 12pt;
+  }
+
+  .card {
+    border: 1px solid #999;
+    box-shadow: none;
+    break-inside: avoid;
+  }
+
+  .page {
+    max-width: none;
+    padding: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

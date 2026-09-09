@@ -1,0 +1,62 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "classroom-copilot",
+  "main": ".open-next/worker.js",
+
+  // Pinned to the date this configuration was verified against workerd.
+  "compatibility_date": "2026-09-08",
+  // nodejs_compat is required by the OpenNext adapter, and is also what gives
+  // postgres.js a working `node:net` on top of Cloudflare's TCP sockets.
+  "compatibility_flags": ["nodejs_compat"],
+
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+
+  "observability": {
+    "enabled": true
+  },
+
+  // Cloudflare Hyperdrive is required, not optional. postgres.js negotiates TLS
+  // through node:tls, and workerd rejects the options it passes
+  // (ERR_OPTION_NOT_IMPLEMENTED: options.rejectUnauthorized) — verified for
+  // every ssl mode. A Worker therefore cannot reach Supabase directly with this
+  // driver. Hyperdrive terminates TLS to the database and presents a plaintext
+  // endpoint inside Cloudflare's network; it also pools connections, which
+  // matters because each request opens its own.
+  //
+  // Create it with:
+  //   npx wrangler hyperdrive create classroom-copilot-db \
+  //     --connection-string="postgresql://USER:PASSWORD@HOST:5432/postgres" \
+  //     --caching-disabled
+  // then paste the returned id below.
+  //
+  // --caching-disabled is not optional either. Hyperdrive caches SQL responses
+  // by default, and realtime here is a counter re-read about once a second: a
+  // cached read leaves the whole class on the previous question, silently.
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "REPLACE_WITH_HYPERDRIVE_ID",
+      // Used only by `wrangler dev`. Override it per-run with
+      // WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE; production
+      // always uses the id above.
+      "localConnectionString": "postgresql://postgres:postgres@127.0.0.1:5432/classroom_copilot_workers_test"
+    }
+  ],
+
+  "vars": {
+    // Each event-stream connection polls one indexed counter on this interval.
+    // 1000ms on Workers rather than the 400ms used under Node: every query is
+    // a subrequest here, and the difference is ~227k versus ~567k queries for a
+    // single 90-minute class of forty. Updates still land well under a second.
+    "CC_STREAM_POLL_MS": "1000",
+    // Ends each stream comfortably inside any platform ceiling; the browser
+    // reconnects immediately and that reconnect is a free full re-sync.
+    "CC_STREAM_LIFETIME_MS": "50000"
+  }
+
+  // DATABASE_URL is a secret, not a var: `wrangler secret put DATABASE_URL`.
+  // APP_ORIGIN is set per-environment below once the hostname is known.
+}

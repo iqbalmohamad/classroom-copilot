@@ -1,0 +1,36 @@
+node_modules/
+.next/
+out/
+build/
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+*.tsbuildinfo
+next-env.d.ts
+
+# Local env — never commit secrets
+.env
+.env.local
+.env.*.local
+.env.production
+.env.test.local
+
+.vercel
+.DS_Store
+npm-debug.log*
+/tmp-*
+shots.local.mjs
+_bench_*.ts
+*.local.mjs
+*.local.mts
+
+.dev.vars
+.dev.vars.*
+.open-next/
+.wrangler/
+
+# Written by `next dev` on every start; not part of the application.
+/AGENTS.md
+/CLAUDE.md
