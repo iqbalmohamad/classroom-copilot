@@ -210,6 +210,8 @@ select {
   font-weight: 600;
   font-size: 15px;
   cursor: pointer;
+  /* Links styled as buttons should not also be underlined. */
+  text-decoration: none;
   transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 
@@ -504,6 +506,43 @@ select {
   border-color: #b9e0d0;
   background: var(--ok-soft);
   color: #0b5c42;
+}
+
+/* -------------------------------------------- presentation screen panel */
+
+.subhead {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+/*
+ * The instructor cannot see the tab they are sharing, so the console has to
+ * state what is on it. Given a tinted box of its own it reads at a glance from
+ * across the desk, which is the distance this is used from.
+ */
+.screen-status {
+  border: 1px solid var(--accent-border);
+  background: var(--accent-soft);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.screen-status-label {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.screen-status-value {
+  display: block;
+  font-size: 17px;
+  font-weight: 650;
+  color: var(--ink);
+  margin-top: 2px;
 }
 
 .divider {

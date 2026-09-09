@@ -43,6 +43,32 @@ async function openScreen(browser: Browser, code: string) {
   return { context, page };
 }
 
+// Matched on the card's own title, because the invite panel refers to the
+// presentation screen in prose and a substring filter picks up both.
+const presentationPanel = (page: Page) =>
+  page
+    .locator("section.card")
+    .filter({ has: page.getByText("Presentation screen", { exact: true }) });
+
+/** What the console says the class is looking at. */
+const currentlyShowing = (page: Page) =>
+  presentationPanel(page).locator(".screen-status-value");
+
+/**
+ * Choose a screen by hand.
+ *
+ * The manual picker sits behind a disclosure, because during a lesson the
+ * screen usually follows the instructor's actions on its own; opening it is
+ * part of the interaction being tested, not setup noise.
+ */
+async function showScreen(page: Page, label: string) {
+  const panel = presentationPanel(page);
+  const open = panel.getByRole("button", { name: "Change screen content" });
+  if (await open.isVisible()) await open.click();
+  await panel.getByRole("button", { name: label, exact: true }).click();
+  await expect(currentlyShowing(page)).toHaveText(label);
+}
+
 test.describe("a live class, across five browsers", () => {
   test("runs the whole M0 flow with no manual refresh anywhere", async ({ browser }) => {
     const instructor = await openInstructor(browser, "Async JavaScript");
@@ -81,6 +107,10 @@ test.describe("a live class, across five browsers", () => {
     }
     await expect(screen.page.getByText("Is a Promise eager?")).toBeVisible();
 
+    // ...and the console says so, without the instructor checking the tab they
+    // are sharing and cannot see.
+    await expect(currentlyShowing(instructor.page)).toHaveText("Poll question");
+
     // The shared screen shows the options but not the split.
     await expect(screen.page.getByText("Yes", { exact: true })).toBeVisible();
     await expect(screen.page.getByText("%")).toHaveCount(0);
@@ -106,6 +136,7 @@ test.describe("a live class, across five browsers", () => {
     await expect(screen.page.getByText("33%")).toBeVisible();
     await expect(screen.page.getByText("67%")).toBeVisible();
     await expect(ada.page.getByText("Class results")).toBeVisible();
+    await expect(currentlyShowing(instructor.page)).toHaveText("Poll results");
 
     // --- closing the poll stops new answers ------------------------------
     await instructor.page.getByRole("button", { name: /close poll/i }).click();
@@ -175,6 +206,10 @@ test.describe("a live class, across five browsers", () => {
     const picked = { Ada: ada, Grace: grace, Alan: alan }[pickedName]!;
     await expect(picked.page.getByText(/you have been picked/i)).toBeVisible();
 
+    // Closing the poll a moment ago left the screen alone; picking someone
+    // moved it. The console claims both, so both are checked.
+    await expect(currentlyShowing(instructor.page)).toHaveText("Selected participant");
+
     // --- the shared screen never leaks anything private --------------------
     //
     // Swept across every state the instructor can put it in, asserting both
@@ -196,24 +231,24 @@ test.describe("a live class, across five browsers", () => {
     await expect(screen.page.locator(".public-pick")).toHaveText(pickedName);
     await sweep("pick");
 
-    await instructor.page.getByRole("button", { name: "Join screen" }).click();
+    await showScreen(instructor.page, "Join code & QR");
     await expect(screen.page.locator(".public-join-code")).toHaveText(code);
     expect(await sweep("join")).not.toContain(pickedName.toLowerCase());
 
-    await instructor.page.getByRole("button", { name: "Question", exact: true }).click();
+    await showScreen(instructor.page, "Poll question");
     await expect(screen.page.getByText("Is a Promise eager?")).toBeVisible();
     await sweep("question");
 
-    await instructor.page.getByRole("button", { name: "Results", exact: true }).click();
+    await showScreen(instructor.page, "Poll results");
     await expect(screen.page.getByText("%").first()).toBeVisible();
     await sweep("results");
 
-    await instructor.page.getByRole("button", { name: "Blank" }).click();
+    await showScreen(instructor.page, "Waiting screen");
     await expect(screen.page.getByText(/back in a moment/i)).toBeVisible();
     expect(await sweep("blank")).not.toContain(pickedName.toLowerCase());
 
     // Put it back on the pick for the reload check below.
-    await instructor.page.getByRole("button", { name: "Picked learner" }).click();
+    await showScreen(instructor.page, "Selected participant");
     await expect(screen.page.locator(".public-pick")).toHaveText(pickedName);
 
     // --- refreshes must not break the class --------------------------------
@@ -323,6 +358,59 @@ test.describe("the learner view on a phone", () => {
       expect(box!.width, `"${label}" is too narrow to tap`).toBeGreaterThanOrEqual(44);
     }
 
+    await instructor.context.close();
+  });
+});
+
+/**
+ * The one control the instructor uses while looking at a tab they cannot see.
+ */
+test.describe("the presentation screen panel", () => {
+  test("tells the instructor what the class can see, including when it is nothing", async ({
+    browser,
+  }) => {
+    const instructor = await openInstructor(browser, "Screen states");
+    const { code } = instructor;
+    const screen = await openScreen(browser, code);
+    const panel = presentationPanel(instructor.page);
+
+    // Nothing has happened yet, so the screen is on the join code and says so.
+    await expect(currentlyShowing(instructor.page)).toHaveText("Join code & QR");
+    await expect(screen.page.locator(".public-join-code")).toHaveText(code);
+
+    // The options that have nothing behind them say so before they are clicked,
+    // rather than after the class is left looking at the wrong thing.
+    await panel.getByRole("button", { name: "Change screen content" }).click();
+    await expect(panel.getByText(/Poll question:.*No question has been shown yet/)).toBeVisible();
+    await expect(panel.getByText(/Selected participant:.*No one has been picked yet/)).toBeVisible();
+
+    // Choosing one anyway is honest about the result: the console reports the
+    // screen it is on, and the screen falls back to the join code.
+    await showScreen(instructor.page, "Poll results");
+    await expect(panel.getByText(/No question has been shown yet/).first()).toBeVisible();
+    await expect(screen.page.locator(".public-join-code")).toHaveText(code);
+
+    // Opening a question moves the screen on its own, with no second control.
+    await instructor.page.getByPlaceholder(/does this make sense/i).fill("Shall we continue?");
+    await instructor.page.getByRole("button", { name: "Yes / No" }).click();
+    await instructor.page.getByRole("button", { name: "Open poll", exact: true }).click();
+    await expect(currentlyShowing(instructor.page)).toHaveText("Poll question");
+    await expect(screen.page.getByText("Shall we continue?")).toBeVisible();
+
+    // The privacy rule the panel promises: picking the results screen by hand
+    // does not reveal results the instructor has not shown.
+    await showScreen(instructor.page, "Poll results");
+    await expect(panel.getByText(/Results stay hidden until you show them/)).toBeVisible();
+    await expect(screen.page.getByText("Shall we continue?")).toBeVisible();
+    await expect(screen.page.getByText("%")).toHaveCount(0);
+    await expect(screen.page.getByText(/results coming up/i)).toBeVisible();
+
+    // Revealing is the only thing that puts them up.
+    await instructor.page.getByRole("button", { name: /show results on screen/i }).click();
+    await expect(screen.page.getByText("%").first()).toBeVisible();
+    await expect(panel.getByText(/Results stay hidden until you show them/)).toHaveCount(0);
+
+    await screen.context.close();
     await instructor.context.close();
   });
 });

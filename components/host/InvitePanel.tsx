@@ -1,41 +1,27 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { PublicMode } from "@/lib/types";
-import type { HostAction } from "./types";
 
 /**
- * Everything needed to get learners into the room, plus control of what the
- * shared screen displays.
+ * How learners get in — and, kept deliberately apart from it, how the
+ * instructor gets back in.
  *
- * The instructor link is behind a disclosure and labelled as a credential, not
- * a join link — the difference has to be obvious at a glance, because pasting
- * the wrong one into a cohort chat hands the class to everyone in it.
+ * The two links look alike and do opposite things: one is meant for the cohort
+ * chat, the other hands over control of the class to anyone holding it. So the
+ * learner half is the body of the panel and the instructor half is a separate,
+ * labelled block behind a disclosure. Controlling the presentation screen is a
+ * different job and lives in its own panel.
  */
-const MODES: { value: PublicMode; label: string }[] = [
-  { value: "join", label: "Join screen" },
-  { value: "poll", label: "Question" },
-  { value: "results", label: "Results" },
-  { value: "pick", label: "Picked learner" },
-  { value: "waiting", label: "Blank" },
-];
-
-export function SharePanel({
+export function InvitePanel({
   code,
   joinUrl,
   qr,
   hostToken,
-  publicMode,
-  disabled,
-  act,
 }: {
   code: string;
   joinUrl: string;
   qr: string | null;
   hostToken: string | null;
-  publicMode: PublicMode;
-  disabled: boolean;
-  act: HostAction;
 }) {
   const [copied, setCopied] = useState<string | null>(null);
   const [copyFailed, setCopyFailed] = useState<string | null>(null);
@@ -70,7 +56,7 @@ export function SharePanel({
   return (
     <section className="card stack">
       <div className="card-title" style={{ marginBottom: 0 }}>
-        Invite &amp; screen
+        Invite learners
       </div>
 
       <div className="row-between">
@@ -93,6 +79,10 @@ export function SharePanel({
         </button>
       </div>
 
+      <p className="tiny muted" style={{ margin: 0 }}>
+        Safe to post in the cohort chat. The presentation screen shows the same code and QR.
+      </p>
+
       {copyFailed ? (
         <div className="notice notice-error" role="alert">
           <p className="small">This browser would not let us copy. Select and copy it by hand:</p>
@@ -102,50 +92,35 @@ export function SharePanel({
         </div>
       ) : null}
 
-      <hr className="divider" />
-
-      <div className="stack-sm">
-        <span className="label">Shared screen shows</span>
-        <div className="btn-group">
-          {MODES.map((mode) => (
-            <button
-              key={mode.value}
-              className={`btn btn-sm ${publicMode === mode.value ? "btn-primary" : ""}`}
-              disabled={disabled}
-              aria-pressed={publicMode === mode.value}
-              onClick={() => act(`/api/rooms/${code}/public-mode`, { mode: mode.value })}
-            >
-              {mode.label}
-            </button>
-          ))}
-        </div>
-        <p className="tiny muted">
-          Opening or revealing a poll switches the screen automatically. The shared screen never
-          shows the roster, and shows a learner&apos;s name only while it is on Picked learner.
-        </p>
-      </div>
-
       {hostLink ? (
         <>
           <hr className="divider" />
           <div className="stack-sm">
-            <button
-              className="btn btn-sm"
-              onClick={() => setShowHostLink((value) => !value)}
-              aria-expanded={showHostLink}
-            >
-              {showHostLink ? "Hide instructor link" : "Instructor link (keep private)"}
-            </button>
+            <span className="subhead">Instructor access — keep private</span>
+            <p className="tiny muted" style={{ margin: 0 }}>
+              Not a join link. Anyone who opens it controls this class.
+            </p>
+            <div>
+              <button
+                className="btn btn-sm"
+                onClick={() => setShowHostLink((value) => !value)}
+                aria-expanded={showHostLink}
+              >
+                {showHostLink ? "Hide instructor link" : "Show instructor link"}
+              </button>
+            </div>
             {showHostLink ? (
               <>
-                <p className="tiny muted">
+                <p className="tiny muted" style={{ margin: 0 }}>
                   Save this if you might need the console on another device — it is the only way
-                  back in if this browser forgets the class. Anyone with this link controls the
-                  class, so keep it out of the shared screen and out of the cohort chat.
+                  back in if this browser forgets the class. Keep it off the presentation screen
+                  and out of the cohort chat.
                 </p>
-                <button className="btn btn-sm" onClick={() => copy("host", hostLink)}>
-                  {copied === "host" ? "Copied" : "Copy instructor link"}
-                </button>
+                <div>
+                  <button className="btn btn-sm" onClick={() => copy("host", hostLink)}>
+                    {copied === "host" ? "Copied" : "Copy instructor link"}
+                  </button>
+                </div>
               </>
             ) : null}
           </div>

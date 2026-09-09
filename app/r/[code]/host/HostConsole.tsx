@@ -5,7 +5,8 @@ import Link from "next/link";
 import { api, ApiRequestError } from "@/lib/client/api";
 import { useRoomState } from "@/lib/client/useRoomState";
 import { ConnectionBadge } from "@/components/ConnectionBadge";
-import { SharePanel } from "@/components/host/SharePanel";
+import { InvitePanel } from "@/components/host/InvitePanel";
+import { PresentationPanel } from "@/components/host/PresentationPanel";
 import { PollPanel } from "@/components/host/PollPanel";
 import { PulsePanel } from "@/components/host/PulsePanel";
 import { QuestionQueue } from "@/components/host/QuestionQueue";
@@ -18,8 +19,8 @@ import { ClassReadPanel } from "@/components/host/ClassReadPanel";
  *
  * Everything an instructor needs mid-lesson is on one screen: no tabs, no
  * modals, no navigation. The left column is what they act on (ask a question,
- * work the queue), the right column is what they read (who is here, how the
- * class feels, what the projector is showing).
+ * work the queue); the right column is the class itself — the screen they are
+ * sharing, how learners get in, who is here and how the room feels.
  */
 export function HostConsole({
   code,
@@ -95,9 +96,6 @@ export function HostConsole({
         </div>
         <div className="row">
           <ConnectionBadge connection={connection} />
-          <Link className="btn btn-sm" href={`/r/${code}/screen`} target="_blank">
-            Open screen view
-          </Link>
           <Link className="btn btn-sm" href={`/r/${code}/summary`}>
             Summary
           </Link>
@@ -124,15 +122,16 @@ export function HostConsole({
         </div>
 
         <div className="stack">
-          <SharePanel
+          <PresentationPanel
             code={code}
-            joinUrl={joinUrl}
-            qr={qr}
-            hostToken={hostToken}
             publicMode={snapshot.room.publicMode}
+            polls={snapshot.polls}
+            hasPick={snapshot.picks.length > 0}
+            ended={ended}
             disabled={ended}
             act={act}
           />
+          <InvitePanel code={code} joinUrl={joinUrl} qr={qr} hostToken={hostToken} />
           <PulsePanel pulse={snapshot.pulse} disabled={ended} act={act} code={code} />
           <PickerPanel picks={snapshot.picks} disabled={ended} act={act} code={code} />
           {snapshot.aiEnabled ? <ClassReadPanel code={code} disabled={ended} /> : null}
