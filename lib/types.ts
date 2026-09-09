@@ -10,7 +10,14 @@ export type PollStatus = "draft" | "open" | "closed";
 export type PulseValue = "got_it" | "shaky" | "lost";
 export type QuestionStatus = "open" | "answered" | "hidden";
 export type RoomStatus = "open" | "ended";
-export type PublicMode = "join" | "poll" | "results" | "pick" | "waiting";
+export type PublicMode =
+  | "join"
+  | "poll"
+  | "results"
+  | "pick"
+  | "waiting"
+  | "activity"
+  | "response";
 export type Role = "instructor" | "learner" | "public";
 
 export const PULSE_VALUES: readonly PulseValue[] = ["got_it", "shaky", "lost"];
@@ -78,6 +85,15 @@ export interface QuestionView {
   votedByMe: boolean | null;
   /** Instructor-only: display name when the learner chose not to be anonymous. */
   authorName?: string | null;
+  /**
+   * Where the question was asked, captured when it was submitted. Moving the
+   * class on does not relabel it, so "which bit were they stuck on" survives.
+   * Null means the learner chose "general question".
+   */
+  sectionId: string | null;
+  sectionTitle: string | null;
+  activityId: string | null;
+  activityTitle: string | null;
 }
 
 /**
@@ -105,6 +121,165 @@ export interface PickView {
   createdAt: string;
 }
 
+
+// ------------------------------------------------------------------ sections
+
+export interface SectionView {
+  id: string;
+  position: number;
+  title: string;
+}
+
+// -------------------------------------------------------------- pulse rounds
+
+export type PulseRoundStatus = "open" | "closed";
+
+/**
+ * One round of the class pulse.
+ *
+ * Aggregate only, at every level: a round carries counts, never who chose what.
+ * That is the promise learners are answering under, and it holds in exports and
+ * in the summary as well as on screen.
+ */
+export interface PulseRoundView {
+  id: string;
+  seq: number;
+  label: string | null;
+  sectionId: string | null;
+  sectionTitle: string | null;
+  status: PulseRoundStatus;
+  openedAt: string;
+  closedAt: string | null;
+  summary: PulseSummary;
+}
+
+// --------------------------------------------------------------- activities
+
+export type ActivityStatus = "draft" | "open" | "closed";
+export type ReviewState = "pending" | "reviewed" | "needs_follow_up";
+
+export const REVIEW_LABELS: Record<ReviewState, string> = {
+  pending: "Pending",
+  reviewed: "Reviewed",
+  needs_follow_up: "Needs follow-up",
+};
+
+export interface ActivityFieldView {
+  key: string;
+  label: string;
+  type: "short_text" | "number" | "long_text" | "sql" | "choice";
+  required: boolean;
+  placeholder?: string;
+  options?: PollOption[];
+}
+
+/** An activity as any surface sees it. Never carries anyone's answers. */
+export interface ActivityView {
+  id: string;
+  seq: number;
+  sectionId: string | null;
+  title: string;
+  instructions: string | null;
+  fields: ActivityFieldView[];
+  status: ActivityStatus;
+  attempt: number;
+  durationSeconds: number | null;
+  responseCount: number;
+  openedAt: string | null;
+  closedAt: string | null;
+  createdAt: string;
+  /** Instructor only: their own answer, kept for marking by eye. */
+  referenceAnswer?: string | null;
+  /** Instructor only: how much of the pile still needs attention. */
+  reviewCounts?: Record<ReviewState, number>;
+}
+
+/**
+ * One learner's submission, as the instructor sees it.
+ *
+ * Named on purpose — the instructor has to be able to invite the author to
+ * explain — and learners are told so before they submit. This shape is only
+ * ever built for a host-authorised request; no learner or public projection
+ * constructs it.
+ */
+export interface ActivityResponseView {
+  id: string;
+  activityId: string;
+  participantId: string | null;
+  displayName: string;
+  answers: Record<string, string>;
+  reviewState: ReviewState;
+  feedback: string | null;
+  revealed: boolean;
+  revealAuthor: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A learner's own submission, returned only to that learner. */
+export interface MySubmission {
+  activityId: string;
+  answers: Record<string, string>;
+  updatedAt: string;
+  reviewState: ReviewState;
+  /** Private feedback from the instructor, visible only to its author. */
+  feedback: string | null;
+}
+
+/** A response on the shared screen. The author is anonymous unless named on purpose. */
+export interface RevealedResponseView {
+  activityTitle: string;
+  fields: ActivityFieldView[];
+  answers: Record<string, string>;
+  /** Present only when the instructor deliberately chose to name the author. */
+  authorName: string | null;
+}
+
+// ---------------------------------------------------------------- materials
+
+export interface MaterialView {
+  id: string;
+  sectionId: string | null;
+  sectionTitle: string | null;
+  title: string;
+  url: string;
+  note: string | null;
+  highlighted: boolean;
+}
+
+// ------------------------------------------------------------------- timers
+
+export type TimerStatus = "running" | "paused" | "ended";
+
+/** The activity as the shared screen sees it: the prompt, and nothing to act on. */
+export interface PublicActivityView {
+  title: string;
+  instructions: string | null;
+  fields: ActivityFieldView[];
+  status: ActivityStatus;
+}
+
+/** The countdown as the shared screen sees it. */
+export interface PublicTimerView {
+  label: string;
+  status: TimerStatus;
+  durationSeconds: number;
+  endsAt: string | null;
+  remainingSeconds: number | null;
+}
+
+export interface TimerView {
+  id: string;
+  label: string;
+  status: TimerStatus;
+  durationSeconds: number;
+  endsAt: string | null;
+  remainingSeconds: number | null;
+  autoClose: boolean;
+  expired: boolean;
+  activityId: string | null;
+}
+
 export interface RoomHeader {
   code: string;
   title: string;
@@ -112,6 +287,8 @@ export interface RoomHeader {
   publicMode: PublicMode;
   createdAt: string;
   endedAt: string | null;
+  currentSectionId: string | null;
+  currentSectionTitle: string | null;
 }
 
 export interface InstructorSnapshot {
@@ -128,6 +305,14 @@ export interface InstructorSnapshot {
   questions: QuestionView[];
   picks: PickView[];
   aiEnabled: boolean;
+  sections: SectionView[];
+  /** The round collecting right now, if any. */
+  pulseRound: PulseRoundView | null;
+  /** Every earlier round, newest first, so a section can be compared with itself. */
+  pulseHistory: PulseRoundView[];
+  activities: ActivityView[];
+  materials: MaterialView[];
+  timer: TimerView | null;
 }
 
 export interface LearnerSnapshot {
@@ -140,6 +325,19 @@ export interface LearnerSnapshot {
   questions: QuestionView[];
   /** Set when this learner is the most recently picked participant. */
   spotlight: boolean;
+  sections: SectionView[];
+  /** Just enough of the round to answer it: its id, and whether it is open. */
+  pulseRound: { id: string; label: string | null; status: PulseRoundStatus } | null;
+  /**
+   * What this learner can act on or has acted on: everything open, plus
+   * anything closed that they answered — so a submission and its feedback do
+   * not vanish from their phone the moment the instructor closes the exercise.
+   */
+  activities: ActivityView[];
+  /** This learner's own submissions, including any private feedback. */
+  mySubmissions: MySubmission[];
+  materials: MaterialView[];
+  timer: TimerView | null;
 }
 
 export interface PublicSnapshot {
@@ -151,6 +349,14 @@ export interface PublicSnapshot {
   activePoll: PollView | null;
   /** Only present while the instructor has the projector on the pick screen. */
   lastPick: { displayName: string } | null;
+  /**
+   * The activity the class is working on. No identifiers: the projector acts on
+   * nothing, so it is handed nothing to act with.
+   */
+  activity: PublicActivityView | null;
+  /** Only present while the instructor has deliberately revealed one. */
+  revealedResponse: RevealedResponseView | null;
+  timer: PublicTimerView | null;
 }
 
 export type Snapshot = InstructorSnapshot | LearnerSnapshot | PublicSnapshot;
