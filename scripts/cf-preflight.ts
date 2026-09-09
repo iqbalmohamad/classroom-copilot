@@ -2,59 +2,85 @@
  * Pre-deployment check for Cloudflare Workers.
  *
  * Catches the handful of mistakes that would otherwise be discovered by a class
- * of forty learners: a placeholder Hyperdrive id, a missing public origin, a
- * secret committed by accident, or a build that was never produced.
+ * of forty learners: a placeholder Hyperdrive id, Hyperdrive caching left on, a
+ * missing public origin, a secret committed by accident, or a build that was
+ * never produced.
  *
  *   npm run cf:check
+ *
+ * A check that could not be run exits nonzero. The decidable logic lives in
+ * scripts/preflight/checks.ts so it can be tested; this file is the I/O.
  */
-import { existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-
-interface Check {
-  name: string;
-  status: "ok" | "warn" | "fail";
-  detail: string;
-}
-
-const results: Check[] = [];
-const add = (name: string, status: Check["status"], detail: string) =>
-  results.push({ name, status, detail });
+import {
+  checkAppOrigin,
+  checkWranglerConfig,
+  parseWranglerConfig,
+  readHyperdriveCaching,
+  readWhoami,
+  summarise,
+  wranglerEntryPath,
+  wranglerInvocation,
+  type Check,
+  type CheckStatus,
+  type WranglerConfig,
+} from "./preflight/checks";
 
 const root = process.cwd();
-const read = (p: string) => readFileSync(join(root, p), "utf8");
+const results: Check[] = [];
+const add = (name: string, status: CheckStatus, detail: string) =>
+  results.push({ name, status, detail });
+
+/**
+ * Runs wrangler without a shell and without npx.
+ *
+ * Returns null rather than throwing, because the caller decides what a failure
+ * means — and for authentication and caching the answer is "blocking", not
+ * "warning". stderr is folded into the output so wrangler's own explanation of
+ * a refusal is available to the readers, which parse it; it is never printed
+ * verbatim, since `hyperdrive get` echoes connection details.
+ */
+function wrangler(args: string[]): string | null {
+  const entry = wranglerEntryPath(root);
+  if (!existsSync(entry)) return null;
+  const { file, args: argv } = wranglerInvocation(root, args, process.execPath);
+  try {
+    return execFileSync(file, argv, {
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 90_000,
+      env: { ...process.env, WRANGLER_SEND_METRICS: "false" },
+    }).toString();
+  } catch (error) {
+    const shell = error as { stdout?: Buffer; stderr?: Buffer };
+    const combined = `${shell.stdout?.toString() ?? ""}\n${shell.stderr?.toString() ?? ""}`;
+    // A refusal still carries the answer we need ("not authenticated"), so hand
+    // it to the reader. Nothing at all means we learned nothing.
+    return combined.trim() ? combined : null;
+  }
+}
 
 // --- wrangler configuration -------------------------------------------------
 
-let wrangler = "";
+let source = "";
+let config: WranglerConfig | null = null;
+let hyperdriveId: string | null = null;
+
 try {
-  wrangler = read("wrangler.jsonc");
-  add("wrangler.jsonc", "ok", "present");
+  source = readFileSync(join(root, "wrangler.jsonc"), "utf8");
 } catch {
   add("wrangler.jsonc", "fail", "missing");
 }
 
-if (wrangler) {
-  if (wrangler.includes("REPLACE_WITH_HYPERDRIVE_ID")) {
-    add(
-      "Hyperdrive binding",
-      "fail",
-      'still the placeholder id. Create one with:\n    npx wrangler hyperdrive create classroom-copilot-db \\\n      --connection-string="postgresql://USER:PASSWORD@HOST:5432/postgres" \\\n      --caching-disabled\n  then paste the returned id into wrangler.jsonc.',
-    );
-  } else if (/"hyperdrive"\s*:/.test(wrangler)) {
-    add("Hyperdrive binding", "ok", "configured");
-  } else {
-    add(
-      "Hyperdrive binding",
-      "fail",
-      "absent. postgres.js cannot negotiate TLS on workerd, so a Worker cannot reach a hosted database without it.",
-    );
-  }
-
-  if (/"compatibility_flags"[\s\S]{0,80}nodejs_compat/.test(wrangler)) {
-    add("nodejs_compat flag", "ok", "set");
-  } else {
-    add("nodejs_compat flag", "fail", "required by the adapter and by postgres.js");
+if (source) {
+  const configChecks = checkWranglerConfig(source);
+  results.push(...configChecks.results);
+  hyperdriveId = configChecks.hyperdriveId;
+  try {
+    config = parseWranglerConfig(source);
+  } catch {
+    config = null;
   }
 }
 
@@ -88,72 +114,76 @@ if (existsSync(join(root, ".open-next", "worker.js"))) {
 
 // --- authentication ---------------------------------------------------------
 
-try {
-  const who = execFileSync("npx", ["wrangler", "whoami"], {
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 60_000,
-  }).toString();
-  if (/not authenticated/i.test(who)) {
-    add("Cloudflare login", "fail", "not authenticated — run `npx wrangler login`");
-  } else {
-    const account = /│\s*(.+?)\s*│\s*([0-9a-f]{32})\s*│/.exec(who);
-    add("Cloudflare login", "ok", account ? `account ${account[1]}` : "authenticated");
-  }
-} catch {
-  add("Cloudflare login", "warn", "could not determine (no network, or wrangler unavailable)");
+const whoami = wrangler(["whoami"]);
+if (whoami === null) {
+  add(
+    "Cloudflare login",
+    "unknown",
+    "wrangler could not be run, so the login could not be checked.\n" +
+      "  Treated as blocking: an unverified login is not a working login.\n" +
+      "  Install dependencies with `npm ci`, then check with: npx wrangler whoami",
+  );
+} else {
+  results.push(readWhoami(whoami));
 }
 
 // --- Hyperdrive caching -----------------------------------------------------
 
 // Hyperdrive caches SQL responses by default, which breaks a transport built on
-// re-reading a counter. Only checkable when authenticated, but worth checking:
-// the symptom in a class is "everyone is stuck on the last question".
-const hyperdriveId = /"id"\s*:\s*"([0-9a-f]{16,})"/.exec(wrangler)?.[1];
-if (hyperdriveId) {
-  try {
-    const info = execFileSync("npx", ["wrangler", "hyperdrive", "get", hyperdriveId], {
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 60_000,
-    }).toString();
-    if (/"disabled"\s*:\s*true/.test(info) || /caching[^\n]*disabled/i.test(info)) {
-      add("Hyperdrive caching", "ok", "disabled, as this app requires");
-    } else {
-      add(
-        "Hyperdrive caching",
-        "fail",
-        `appears to be enabled. Realtime updates will go stale.\n  Fix: npx wrangler hyperdrive update ${hyperdriveId} --caching-disabled`,
-      );
-    }
-  } catch {
-    add("Hyperdrive caching", "warn", "could not check (not authenticated, or no network)");
+// re-reading a counter once a second: the symptom in a class is "everyone is
+// stuck on the last question", with nothing in the logs to say why. Not being
+// able to confirm the setting is therefore blocking, not a note.
+if (!hyperdriveId) {
+  add(
+    "Hyperdrive caching",
+    "unknown",
+    "no usable Hyperdrive id in wrangler.jsonc, so caching could not be checked.\n" +
+      "  Treated as blocking. Fix the Hyperdrive binding above first.",
+  );
+} else {
+  const info = wrangler(["hyperdrive", "get", hyperdriveId]);
+  if (info === null) {
+    add(
+      "Hyperdrive caching",
+      "unknown",
+      "wrangler could not be run, so the caching setting could not be read.\n" +
+        "  Treated as blocking, because caching left on breaks realtime silently.\n" +
+        `  Check manually with: npx wrangler hyperdrive get ${hyperdriveId}`,
+    );
+  } else {
+    results.push(readHyperdriveCaching(info, hyperdriveId));
   }
 }
 
 // --- origin -----------------------------------------------------------------
 
-const origin = process.env.APP_ORIGIN?.trim();
-if (origin) {
-  add("APP_ORIGIN", "ok", origin);
-} else {
-  add(
-    "APP_ORIGIN",
-    "warn",
-    "not set in this shell. It must be set on the deployed Worker, or join URLs and the QR code are built from request headers.\n  Add it to the `vars` block in wrangler.jsonc once the hostname is known.",
-  );
-}
+results.push(checkAppOrigin(config, process.env));
 
 // --- report -----------------------------------------------------------------
 
-const symbol = { ok: "  ok  ", warn: " warn ", fail: " FAIL " } as const;
+const symbol: Record<CheckStatus, string> = {
+  ok: "  ok   ",
+  warn: " warn  ",
+  fail: " FAIL  ",
+  unknown: " UNKNOWN",
+};
+
 console.log("\nCloudflare pre-deployment check\n");
 for (const r of results) {
   console.log(`[${symbol[r.status]}] ${r.name}: ${r.detail}`);
 }
 
-const failures = results.filter((r) => r.status === "fail");
+const { blocking, exitCode } = summarise(results);
 console.log("");
-if (failures.length > 0) {
-  console.log(`${failures.length} blocking problem(s). Deployment would not work yet.`);
-  process.exit(1);
+if (blocking.length > 0) {
+  const unverified = blocking.filter((c) => c.status === "unknown").length;
+  console.log(
+    `${blocking.length} blocking problem(s)` +
+      (unverified > 0 ? `, of which ${unverified} could not be verified` : "") +
+      ". Deployment is not ready.",
+  );
+  console.log("An unverified check is not a passing check; nothing above was assumed.");
+} else {
+  console.log("All checks verified. No blocking problems found.");
 }
-console.log("No blocking problems found.");
+process.exit(exitCode);
