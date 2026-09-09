@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { savedClasses } from "@/lib/client/tokens";
 
 /**
  * How learners get in — and, kept deliberately apart from it, how the
@@ -14,11 +15,13 @@ import { useEffect, useState } from "react";
  */
 export function InvitePanel({
   code,
+  title,
   joinUrl,
   qr,
   hostToken,
 }: {
   code: string;
+  title: string;
   joinUrl: string;
   qr: string | null;
   hostToken: string | null;
@@ -27,6 +30,9 @@ export function InvitePanel({
   const [copyFailed, setCopyFailed] = useState<string | null>(null);
   const [showHostLink, setShowHostLink] = useState(false);
   const [origin, setOrigin] = useState<string | null>(null);
+  const [kept, setKept] = useState(false);
+
+  useEffect(() => setKept(savedClasses.has(code)), [code]);
 
   // The browser's own origin is the one address that cannot be spoofed by a
   // forwarded-host header, so links the instructor copies are built from it.
@@ -109,6 +115,28 @@ export function InvitePanel({
                 {showHostLink ? "Hide instructor link" : "Show instructor link"}
               </button>
             </div>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={kept}
+                onChange={(event) => {
+                  if (event.target.checked && hostToken) {
+                    savedClasses.keep({ code, title, token: hostToken });
+                    setKept(true);
+                  } else {
+                    savedClasses.forget(code);
+                    setKept(false);
+                  }
+                }}
+              />
+              Keep this class on this device
+            </label>
+            <p className="tiny muted" style={{ margin: 0 }}>
+              Off by default. Turning it on stores this class&apos;s instructor key in this
+              browser so it appears under <strong>Your classes</strong> and you can reopen its
+              answers weeks later. Leave it off on a shared classroom machine.
+            </p>
+
             {showHostLink ? (
               <>
                 <p className="tiny muted" style={{ margin: 0 }}>

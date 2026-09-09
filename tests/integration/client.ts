@@ -11,6 +11,8 @@ export const BASE_URL = process.env.CC_TEST_BASE_URL ?? `http://127.0.0.1:${PORT
 export interface Result<T> {
   status: number;
   body: T;
+  /** A few response headers tests need to assert on (redirect targets). */
+  headers?: Record<string, string>;
 }
 
 export class Client {
@@ -61,7 +63,11 @@ export class Client {
         body = { raw: text };
       }
     }
-    return { status: response.status, body: body as T };
+    return {
+      status: response.status,
+      body: body as T,
+      headers: { location: response.headers.get("location") ?? "" },
+    };
   }
 
   get<T = unknown>(path: string) {

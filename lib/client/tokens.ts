@@ -112,3 +112,74 @@ export const planKeys = {
     return planKeys.list().find((plan) => plan.id === id) ?? null;
   },
 };
+
+/**
+ * Classes this instructor chose to keep on this device.
+ *
+ * Opt-in, and off by default. The host token is otherwise deliberately not
+ * stored in the browser: a console is often opened on a shared classroom
+ * machine, and a copy there would outlive the lesson. Keeping a class is
+ * therefore an explicit act with the same warning the instructor link carries —
+ * and it is what makes "open Day 30's answers while teaching Day 31" possible
+ * a week later, once the session cookie has long expired.
+ *
+ * Without it nothing changes: the instructor link is still the recovery path.
+ */
+const CLASSES = "cc.classes";
+
+export interface SavedClass {
+  code: string;
+  title: string;
+  token: string;
+  savedAt: string;
+}
+
+function readClasses(): SavedClass[] {
+  const raw = read(CLASSES);
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (entry): entry is SavedClass =>
+        !!entry &&
+        typeof entry === "object" &&
+        typeof (entry as SavedClass).code === "string" &&
+        typeof (entry as SavedClass).token === "string" &&
+        typeof (entry as SavedClass).title === "string",
+    );
+  } catch {
+    return [];
+  }
+}
+
+export const savedClasses = {
+  list: readClasses,
+
+  has(code: string): boolean {
+    return readClasses().some((entry) => entry.code === code);
+  },
+
+  keep(entry: Omit<SavedClass, "savedAt">): void {
+    const next = [
+      { ...entry, savedAt: new Date().toISOString() },
+      ...readClasses().filter((saved) => saved.code !== entry.code),
+    ];
+    write(CLASSES, JSON.stringify(next.slice(0, 40)));
+  },
+
+  forget(code: string): void {
+    write(CLASSES, JSON.stringify(readClasses().filter((entry) => entry.code !== code)));
+  },
+
+  /**
+   * The link that re-establishes instructor access.
+   *
+   * The same claim endpoint the instructor link uses: the token is verified
+   * server-side and moved into an httpOnly cookie, then the browser is
+   * redirected, so it never lingers in the address bar or in history.
+   */
+  link(entry: SavedClass, to: "console" | "summary" = "console"): string {
+    return `/api/rooms/${entry.code}/claim?t=${encodeURIComponent(entry.token)}&to=${to}`;
+  },
+};

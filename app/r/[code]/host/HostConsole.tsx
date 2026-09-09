@@ -177,7 +177,13 @@ export function HostConsole({
             disabled={ended}
             act={act}
           />
-          <InvitePanel code={code} joinUrl={joinUrl} qr={qr} hostToken={hostToken} />
+          <InvitePanel
+            code={code}
+            title={snapshot.room.title}
+            joinUrl={joinUrl}
+            qr={qr}
+            hostToken={hostToken}
+          />
           <TimerPanel
             code={code}
             timer={snapshot.timer}

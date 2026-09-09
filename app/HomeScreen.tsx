@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api, ApiRequestError } from "@/lib/client/api";
 import { normalizeRoomCode } from "@/lib/room-code";
-import { planKeys, type StoredPlan } from "@/lib/client/tokens";
+import { planKeys, savedClasses, type SavedClass, type StoredPlan } from "@/lib/client/tokens";
 
 /**
  * The one page both roles land on: start a class, or join one.
@@ -21,6 +21,9 @@ export function HomeScreen() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [plan, setPlan] = useState<StoredPlan | null>(null);
+  const [classes, setClasses] = useState<SavedClass[]>([]);
+
+  useEffect(() => setClasses(savedClasses.list()), []);
 
   useEffect(() => {
     if (params.get("error") === "bad-host-link") {
@@ -139,6 +142,41 @@ export function HomeScreen() {
           </form>
         </section>
       </div>
+
+      {classes.length > 0 ? (
+        <section className="card stack" style={{ marginTop: 20 }}>
+          <div className="card-title" style={{ marginBottom: 0 }}>
+            Your classes
+          </div>
+          <p className="tiny muted" style={{ margin: 0 }}>
+            Kept on this device because you asked. Opening one signs you back in as its
+            instructor — the answers and feedback are behind that, never behind the class code.
+          </p>
+          <ul className="list">
+            {classes.map((entry) => (
+              <li key={entry.code}>
+                <div className="row-between" style={{ gap: 8 }}>
+                  <span className="small">
+                    {entry.title}
+                    <span className="tiny muted">
+                      {" · "}
+                      {entry.code} · {new Date(entry.savedAt).toLocaleDateString()}
+                    </span>
+                  </span>
+                  <span className="btn-group" style={{ flexWrap: "nowrap" }}>
+                    <a className="btn btn-sm" href={savedClasses.link(entry, "summary")}>
+                      Answers
+                    </a>
+                    <a className="btn btn-sm" href={savedClasses.link(entry)}>
+                      Console
+                    </a>
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </main>
   );
 }
