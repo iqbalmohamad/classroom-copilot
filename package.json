@@ -13,7 +13,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "verify": "npm run typecheck && npm run test && npm run test:e2e"
+    "verify": "npm run typecheck && npm run test && npm run test:e2e",
+    "cf:build": "opennextjs-cloudflare build",
+    "cf:preview": "opennextjs-cloudflare build && wrangler dev",
+    "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "cf:check": "tsx scripts/cf-preflight.ts",
+    "test:workers": "bash scripts/test-workers.sh"
   },
   "dependencies": {
     "next": "16.3.4",
@@ -24,6 +29,7 @@
     "zod": "3.25.76"
   },
   "devDependencies": {
+    "@opennextjs/cloudflare": "1.20.6",
     "@playwright/test": "1.56.0",
     "@types/node": "22.15.3",
     "@types/qrcode": "1.5.5",
@@ -32,7 +38,8 @@
     "dotenv": "16.4.7",
     "tsx": "4.19.2",
     "typescript": "5.7.3",
-    "vitest": "3.2.4"
+    "vitest": "3.2.4",
+    "wrangler": "4.130.0"
   },
   "engines": {
     "node": ">=20.9"

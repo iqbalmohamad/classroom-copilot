@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { cookieOptions, hostCookieName } from "@/lib/auth";
 import { loadRoom } from "@/lib/route-context";
 import { tokenMatches } from "@/lib/ids";
+import { withRequestDatabase } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,11 @@ export const dynamic = "force-dynamic";
  * the address bar or in browser history.
  */
 export async function GET(req: Request, ctx: { params: Promise<{ code: string }> }) {
+  // This route does not go through handle(), so it opens its own scope.
+  return withRequestDatabase(() => claim(req, ctx));
+}
+
+async function claim(req: Request, ctx: { params: Promise<{ code: string }> }) {
   const { code } = await ctx.params;
   const token = new URL(req.url).searchParams.get("t") ?? "";
 

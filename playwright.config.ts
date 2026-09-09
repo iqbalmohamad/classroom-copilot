@@ -9,7 +9,15 @@ import { defineConfig, devices } from "@playwright/test";
  * tests cannot show that: only a browser can.
  */
 const PORT = Number(process.env.CC_E2E_PORT ?? 3312);
-const BASE_URL = `http://127.0.0.1:${PORT}`;
+/**
+ * Point CC_E2E_BASE_URL at an already-running server to test something other
+ * than a local `next start` — in particular a Cloudflare Worker under workerd,
+ * which is the only way to get browser-level evidence that the deployment
+ * target actually works. That server owns its own database, so the setup that
+ * creates and migrates one is skipped.
+ */
+const EXTERNAL = process.env.CC_E2E_BASE_URL?.trim();
+const BASE_URL = EXTERNAL || `http://127.0.0.1:${PORT}`;
 
 const databaseUrl =
   process.env.CC_E2E_DATABASE_URL ??
@@ -19,8 +27,9 @@ const databaseUrl =
 export default defineConfig({
   testDir: "./e2e",
   // Creates and migrates the suite's own database, and rebuilds, so a green run
-  // always reflects the code in the working tree.
-  globalSetup: "./e2e/global-setup.ts",
+  // always reflects the code in the working tree. Skipped when testing an
+  // external server, which brings its own.
+  globalSetup: EXTERNAL ? undefined : "./e2e/global-setup.ts",
   timeout: 90_000,
   expect: { timeout: 15_000 },
   // One room, several clients: the specs must not race each other.
@@ -35,7 +44,9 @@ export default defineConfig({
     launchOptions: { args: ["--no-sandbox"] },
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: {
+  webServer: EXTERNAL
+    ? undefined
+    : {
     command: `node node_modules/next/dist/bin/next start -p ${PORT}`,
     url: BASE_URL,
     reuseExistingServer: false,
@@ -49,5 +60,5 @@ export default defineConfig({
       // The suites run over plain http on loopback.
       CC_ALLOW_INSECURE_COOKIES: "1",
     },
-  },
+      },
 });

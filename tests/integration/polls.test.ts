@@ -139,15 +139,38 @@ describe("polls", () => {
     expect(JSON.stringify(late.body)).toContain("closed");
   });
 
-  it("does not lose answers that were already in flight when a poll closes", async () => {
+  it("keeps every answer that arrives before the poll closes", async () => {
     const { instructor, code } = await createRoom();
     const learners = await Promise.all(
       Array.from({ length: 10 }, (_, i) => joinAs(code, `R${i + 1}`)),
     );
     const pollId = await openPoll(instructor, code, { prompt: "Go", kind: "yes_no" });
 
-    // Close while responses are arriving: every call must resolve to a clear
-    // accept or a clear rejection, never a server error or a lost write.
+    await Promise.all(
+      learners.map(({ learner }) =>
+        learner.post(`/api/rooms/${code}/polls/${pollId}/respond`, { value: "yes" }),
+      ),
+    );
+    await instructor.post(`/api/rooms/${code}/polls/${pollId}`, { action: "close" });
+
+    const state = await snapshotFor<InstructorSnapshot>(instructor, code, "instructor");
+    expect(state.body.snapshot.polls.find((p) => p.id === pollId)?.responseCount).toBe(10);
+  });
+
+  it("resolves every answer racing a close as a clean accept or a clean rejection", async () => {
+    const { instructor, code } = await createRoom();
+    const learners = await Promise.all(
+      Array.from({ length: 10 }, (_, i) => joinAs(code, `S${i + 1}`)),
+    );
+    const pollId = await openPoll(instructor, code, { prompt: "Race", kind: "yes_no" });
+
+    // Whether the close or the answers win is a matter of microseconds and
+    // differs by host — under Node the answers usually land first, on Workers
+    // the close usually does, because every request there pays for its own
+    // database connection. That ordering is not the contract. The contract is
+    // that nothing is ever half-applied: each call is accepted or refused
+    // outright, never a server error, and the stored count matches exactly the
+    // number of calls that reported success.
     const responses = await Promise.all([
       ...learners.map(({ learner }) =>
         learner.post(`/api/rooms/${code}/polls/${pollId}/respond`, { value: "yes" }),
@@ -155,18 +178,22 @@ describe("polls", () => {
       instructor.post(`/api/rooms/${code}/polls/${pollId}`, { action: "close" }),
     ]);
 
-    for (const result of responses) {
+    const answers = responses.slice(0, learners.length);
+    for (const result of answers) {
       expect([200, 409]).toContain(result.status);
     }
+    expect(responses[responses.length - 1]!.status).toBe(200); // the close itself
 
+    const accepted = answers.filter((r) => r.status === 200).length;
     const state = await snapshotFor<InstructorSnapshot>(instructor, code, "instructor");
-    const poll = state.body.snapshot.polls.find((p) => p.id === pollId);
-    const accepted = responses.filter((r) => r.status === 200).length - 1; // minus the close
+    expect(state.body.snapshot.polls.find((p) => p.id === pollId)?.responseCount).toBe(accepted);
 
-    // Consistency alone would also hold if the close won every race and nothing
-    // was recorded, so pin a floor too: answers sent before the close must land.
-    expect(accepted).toBeGreaterThan(0);
-    expect(poll?.responseCount).toBe(accepted);
+    // And the poll really is closed afterwards, whichever way the race went.
+    const late = await learners[0]!.learner.post(
+      `/api/rooms/${code}/polls/${pollId}/respond`,
+      { value: "no" },
+    );
+    expect(late.status).toBe(409);
   });
 
   it("rejects an answer that is not one of the offered options", async () => {

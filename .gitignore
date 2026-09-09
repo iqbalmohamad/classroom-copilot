@@ -25,3 +25,8 @@ shots.local.mjs
 _bench_*.ts
 *.local.mjs
 *.local.mts
+
+.dev.vars
+.dev.vars.*
+.open-next/
+.wrangler/

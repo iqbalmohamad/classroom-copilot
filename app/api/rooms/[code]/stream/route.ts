@@ -1,5 +1,6 @@
 import { findRoom, touchParticipant, resolveParticipant, type RoomRow } from "@/lib/auth";
 import { fail } from "@/lib/http";
+import { openDatabaseScope } from "@/lib/db";
 import { loadRoom } from "@/lib/route-context";
 import { buildSnapshot } from "@/lib/snapshot";
 import type { Role } from "@/lib/types";
@@ -10,12 +11,30 @@ export const dynamic = "force-dynamic";
  *  browser's EventSource reconnect, which also re-syncs state for free. */
 export const maxDuration = 60;
 
-const POLL_INTERVAL_MS = 400;
+/**
+ * How often the loop checks the room version.
+ *
+ * Configurable because the right answer differs by host. Under Node a query is
+ * a pooled round trip and 400ms is nearly free. On Cloudflare Workers every
+ * query is a subrequest against a per-invocation budget, and the difference
+ * between 400ms and 1000ms across a 90-minute class of forty is roughly 567,000
+ * versus 227,000 queries. Updates still land well inside a second either way.
+ */
+function pollIntervalMs(): number {
+  const parsed = Number.parseInt(process.env.CC_STREAM_POLL_MS ?? "", 10);
+  return Number.isFinite(parsed) && parsed >= 100 ? Math.min(parsed, 5_000) : 400;
+}
+
+/** How long a stream lives before asking the browser to reconnect. */
+function lifetimeMs(): number {
+  const parsed = Number.parseInt(process.env.CC_STREAM_LIFETIME_MS ?? "", 10);
+  return Number.isFinite(parsed) && parsed >= 5_000 ? Math.min(parsed, 240_000) : 50_000;
+}
+
 /** Comfortably inside the client's 35s silence budget, even if a tick is slow. */
 const HEARTBEAT_MS = 10_000;
 /** Re-emit even without a version change so derived data (presence) stays fresh. */
 const REFRESH_MS = 10_000;
-const MAX_LIFETIME_MS = 50_000;
 
 /**
  * Server-sent events carrying role-scoped snapshots.
@@ -27,44 +46,75 @@ const MAX_LIFETIME_MS = 50_000;
  * unavailable, so a proxy that buffers SSE degrades rather than breaks.
  */
 export async function GET(req: Request, ctx: { params: Promise<{ code: string }> }) {
+  // This connection has to outlive the handler, so the scope is opened here and
+  // closed by the stream body — not by withRequestDatabase, whose lifetime ends
+  // when the handler returns. Every early return below closes it explicitly;
+  // forgetting one would strand a database connection for the whole class.
+  const scope = openDatabaseScope();
+  const refuse = async (...args: Parameters<typeof fail>) => {
+    await scope.end();
+    return fail(...args);
+  };
+
   const { code } = await ctx.params;
   const url = new URL(req.url);
   const role = url.searchParams.get("role") ?? "public";
   if (role !== "instructor" && role !== "learner" && role !== "public") {
-    return fail("bad_request", "Unknown view.");
+    return refuse("bad_request", "Unknown view.");
   }
 
   let room: RoomRow;
   try {
-    room = await loadRoom(code);
+    room = await scope.run(() => loadRoom(code));
   } catch (error) {
     // Only a genuinely missing room is a 404. Reporting a pool timeout as
     // "class not found" would send an instructor hunting for a typo in a code
     // that is perfectly correct.
     if ((error as { code?: string }).code === "not_found") {
-      return fail("not_found", "That class code was not found.");
+      return refuse("not_found", "That class code was not found.");
     }
-    return fail("unavailable", "Could not reach the class right now. Retrying.");
+    return refuse("unavailable", "Could not reach the class right now. Retrying.");
   }
 
   // Authorise once, up front: a rejected stream must fail loudly rather than
   // hang open with nothing on it.
   let first: unknown;
   try {
-    first = await buildSnapshot(req, room, role as Role, { heartbeat: true });
+    first = await scope.run(() => buildSnapshot(req, room, role as Role, { heartbeat: true }));
   } catch (error) {
     const reason = (error as { code?: string }).code;
-    if (reason === "forbidden") return fail("forbidden", "Instructor access is required.");
-    if (reason === "unauthorized") return fail("unauthorized", "Join the class again to continue.");
-    return fail("server_error", "Could not open the live connection.");
+    if (reason === "forbidden") return refuse("forbidden", "Instructor access is required.");
+    if (reason === "unauthorized") {
+      return refuse("unauthorized", "Join the class again to continue.");
+    }
+    return refuse("server_error", "Could not open the live connection.");
   }
 
-  const participant = role === "learner" ? await resolveParticipant(req, room) : null;
+  const participant =
+    role === "learner" ? await scope.run(() => resolveParticipant(req, room)) : null;
   const encoder = new TextEncoder();
   const startedAt = Date.now();
+  const pollInterval = pollIntervalMs();
+  const maxLifetime = lifetimeMs();
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      try {
+        await scope.run(() => pump(controller));
+      } finally {
+        // The one place the streaming connection is released: reached on a
+        // clean cycle, on client disconnect, and on any error in the loop.
+        await scope.end();
+      }
+    },
+    // Fired when the client goes away mid-stream without an abort signal.
+    async cancel() {
+      await scope.end();
+    },
+  });
+
+  async function pump(controller: ReadableStreamDefaultController<Uint8Array>) {
+    {
       let closed = false;
       let lastPayload = "";
       // When we last *built* a snapshot, which is the expensive part. This is
@@ -106,10 +156,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ code: string }>
 
       try {
         while (!closed && !req.signal.aborted) {
-          await sleep(POLL_INTERVAL_MS);
+          await sleep(pollInterval);
           if (closed || req.signal.aborted) break;
 
-          if (Date.now() - startedAt > MAX_LIFETIME_MS) {
+          if (Date.now() - startedAt > maxLifetime) {
             send("cycle", "{}");
             break;
           }
@@ -156,8 +206,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ code: string }>
       } finally {
         finish();
       }
-    },
-  });
+    }
+  }
 
   return new Response(stream, {
     headers: {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { withRequestDatabase } from "./db";
 
 /**
  * Uniform API responses.
@@ -54,15 +55,25 @@ export class ApiError extends Error {
   }
 }
 
-/** Wraps a route handler so unexpected failures never leak internals. */
+/**
+ * Wraps a route handler so unexpected failures never leak internals, and so it
+ * runs inside a database scope.
+ *
+ * The scope is what makes the app work on Cloudflare Workers, where a
+ * connection belongs to the request that opened it and must be closed with it.
+ * Every mutating and reading API route goes through here; the event stream and
+ * the claim redirect manage their own scope because their lifetimes differ.
+ */
 export async function handle(fn: () => Promise<Response>): Promise<Response> {
-  try {
-    return await fn();
-  } catch (error) {
-    if (error instanceof ApiError) return fail(error.code, error.message);
-    console.error("[api]", error);
-    return fail("server_error", "Something went wrong. Please try again.");
-  }
+  return withRequestDatabase(async () => {
+    try {
+      return await fn();
+    } catch (error) {
+      if (error instanceof ApiError) return fail(error.code, error.message);
+      console.error("[api]", error);
+      return fail("server_error", "Something went wrong. Please try again.");
+    }
+  });
 }
 
 export async function readJson<T>(req: Request, schema: { parse: (v: unknown) => T }): Promise<T> {

@@ -54,6 +54,8 @@ upvotes, the pulse at the end, and the picker history. Printable.
 
 - **Next.js 16** (App Router) with **React 19** and **TypeScript**
 - **PostgreSQL** — any Postgres 14+; a **Supabase** project is the expected host
+- **Cloudflare Workers** via the OpenNext adapter, with **Hyperdrive** in front
+  of Postgres (see Deployment — Hyperdrive is required, not optional)
 - **Server-sent events** for realtime, with automatic polling fallback
 - **postgres.js** for database access; no ORM
 - Plain CSS with design tokens; no UI framework
@@ -135,6 +137,8 @@ a second browser (or a phone on the same network) to see both sides.
 | `CC_DISABLE_RATE_LIMIT` | no | Test harnesses only. Never set this on a deployment. |
 | `CC_ALLOW_INSECURE_COOKIES` | no | Drops the `Secure` cookie flag so a local `http://` run works. Set by `npm run dev` and the test harnesses. Never set it on a deployment — session cookies are Secure by default precisely so a missing `NODE_ENV` cannot silently turn that off. |
 | `CC_SKIP_BUILD` | no | Skips the rebuild the test harnesses do before running. Local iteration only. |
+| `CC_STREAM_POLL_MS` | no | How often an open event stream checks the room version. Default `400`. Cloudflare sets `1000` — see the cost note under Deployment. |
+| `CC_STREAM_LIFETIME_MS` | no | How long a stream lives before asking the browser to reconnect. Default `50000`. |
 
 `.env.local` is gitignored. No secret is committed, and no secret reaches the
 browser: everything above is read only in server code (`lib/env.ts` is marked
@@ -184,43 +188,123 @@ described above.
 
 ---
 
-## Deployment
+## Deployment — Cloudflare Workers
 
-The app is a standard Next.js server; anything that runs Next 16 on a Node
-runtime will host it. Vercel is the shortest path.
-
-```bash
-npm i -g vercel
-vercel link
-vercel env add DATABASE_URL production
-vercel env add APP_ORIGIN production              # https://<your-domain>
-vercel --prod
-```
-
-Then run the migration once against the production database:
+The app runs on Cloudflare Workers through the OpenNext adapter
+(`@opennextjs/cloudflare`). Everything below has been exercised against the real
+Workers runtime (`workerd`) locally; what has *not* happened yet is a deploy to
+Cloudflare itself, because this repository has no Cloudflare credentials.
 
 ```bash
-DATABASE_URL='<production connection string>' npm run db:migrate
+npm run cf:build     # build the Worker bundle into .open-next/
+npm run cf:preview   # build, then run it on workerd locally (wrangler dev)
+npm run cf:check     # pre-deployment check: config, secrets, login
+npm run cf:deploy    # build and deploy
+npm run test:workers # the whole suite against workerd, not against next start
 ```
 
-Deployment notes:
+### Hyperdrive is required
 
-- The event-stream route (`app/api/rooms/[code]/stream/route.ts`) declares
-  `maxDuration = 60` and deliberately ends each stream after ~50 seconds,
-  asking the browser to reconnect. That reconnect doubles as a full state
-  re-sync, so a platform that caps streaming responses is handled rather than
-  worked around. On a plan with a shorter cap, lower `MAX_LIFETIME_MS` to sit
-  under it — the client handles the close either way.
-- Every client holds one open stream while the class runs, so a class of forty
-  is forty concurrent invocations. That is well inside normal limits but worth
-  knowing if you are watching function usage.
-- API responses are sent `no-store`; nothing classroom-related is cacheable.
-- Set `APP_ORIGIN` in production. Without it, join URLs and the QR code are
-  built from the request's host headers.
-- A class of forty holds forty-odd streams, each recycled roughly every fifty
-  seconds, so a ninety-minute class is on the order of 4,500 short function
-  invocations and ~60 GB-seconds on a 1 GB instance. Comfortably inside a Pro
-  plan; worth knowing before running several classes a day on Hobby.
+Not a preference — a Worker cannot reach Supabase directly with this driver.
+postgres.js negotiates TLS through `node:tls`, and workerd rejects the options
+it passes:
+
+```
+ERR_OPTION_NOT_IMPLEMENTED: The options.rejectUnauthorized option is not implemented
+  at Object.connect (node-internal:internal_tls_wrap:457:15)
+```
+
+Verified on workerd for `ssl` = `require`, `true`, `prefer`, `allow` and
+`verify-full`: every one fails. Hyperdrive terminates TLS to the database and
+presents a plaintext endpoint inside Cloudflare's network. It also pools
+connections, which matters here because each Worker request opens its own (see
+below).
+
+### Connection lifetime
+
+Under Node the app keeps one pool per process. On Workers it opens a connection
+per request and closes it with the request, because a socket belongs to the I/O
+context that created it. Reusing a pooled connection across requests does not
+merely leak — the invocation hangs and the runtime kills it. Before this was
+fixed, exactly every other request to a Worker returned 500 with *"your Worker's
+code had hung and would never generate a response"*.
+
+The event stream holds its connection for the life of the stream and releases it
+when the stream ends, cycles, or the learner disconnects (`lib/db.ts`,
+`openDatabaseScope`).
+
+### Steps
+
+1. **Create the database.** Any Supabase project. Copy the connection string
+   from Project Settings → Database. Run the migrations against it once:
+   ```bash
+   DATABASE_URL='postgresql://...' npm run db:migrate
+   ```
+   Run this as the role the application will use — see Database setup above.
+
+2. **Create the Hyperdrive configuration** and put its id in `wrangler.jsonc`:
+   ```bash
+   npx wrangler hyperdrive create classroom-copilot-db \
+     --connection-string="postgresql://USER:PASSWORD@HOST:5432/postgres"
+   ```
+   Replace `REPLACE_WITH_HYPERDRIVE_ID` in `wrangler.jsonc` with the id it
+   prints. The database password lives in the Hyperdrive config, not in the
+   Worker.
+
+3. **Set the public origin.** Until the hostname exists this cannot be known, so
+   deploy once, note the `*.workers.dev` hostname (or attach a custom domain),
+   then:
+   ```bash
+   npx wrangler secret put APP_ORIGIN     # https://your-host
+   ```
+   Without it, join URLs and the QR code are built from request headers.
+
+4. **Check and deploy.**
+   ```bash
+   npm run cf:check
+   npm run cf:deploy
+   ```
+
+`npm run cf:check` refuses to pass while the Hyperdrive id is a placeholder,
+`nodejs_compat` is missing, `.dev.vars` is tracked by git, or wrangler is not
+logged in.
+
+### Local development against the Workers runtime
+
+`npm run dev` is the ordinary Next.js dev server and is what you want most of
+the time. To exercise the deployment target:
+
+```bash
+cp .env.example .env.local          # DATABASE_URL for a local Postgres
+npm run test:workers                # builds, starts workerd, runs everything
+```
+
+`wrangler dev` reads local configuration from `.dev.vars` (never committed) and
+uses the Hyperdrive binding's `localConnectionString`, which
+`WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE` overrides per run.
+
+### Plan and cost
+
+The Workers **Free plan will not run this app**, for two independent reasons:
+
+- Free allows **50 external subrequests per invocation**. One event-stream
+  connection makes roughly one database round trip per poll interval for its
+  whole 50-second life — about 50 at `CC_STREAM_POLL_MS=1000`, and about 125 at
+  the Node default of 400ms. Paid allows 10,000 by default.
+- Hyperdrive on Free is capped at **100,000 queries per day**. A single
+  90-minute class of forty is roughly 227,000 at 1000ms (and ~567,000 at 400ms).
+
+**Workers Paid, $5/month minimum**, covers it: Hyperdrive queries are unlimited
+there and included, and 10,000 subrequests per invocation is far above what a
+stream uses. For scale: a 90-minute class of forty holds ~42 concurrent streams,
+each recycled every 50 seconds, so about 4,500 stream invocations plus a few
+thousand ordinary requests — comfortably inside the paid plan's included usage.
+CPU time is what Workers bills, and these streams spend almost all of their wall
+clock waiting on the database rather than executing.
+
+`CC_STREAM_POLL_MS` is the dial: 1000ms is set in `wrangler.jsonc` and more than
+halves the query volume against the Node default, at a measured cost of roughly
+550ms rather than 120ms for an update to reach every phone.
 
 **Production URL:** _not yet deployed — see "Known limitations"._
 
@@ -229,10 +313,17 @@ Deployment notes:
 ## Testing
 
 ```bash
-npm test          # 162 tests: 70 unit + 92 integration
-npm run test:e2e  # 9 multi-browser scenarios
-npm run verify    # typecheck, then both of the above
+npm test           # 163 tests: 71 unit + 92 integration (Node)
+npm run test:e2e   # 9 multi-browser scenarios (Node)
+npm run verify     # typecheck, then both of the above
+npm run test:workers  # integration + browser suites against the Workers runtime
 ```
+
+`npm run test:workers` is the one that proves the deployment target works. It
+builds the Worker, starts `workerd` via `wrangler dev`, and runs the same
+integration and browser suites against it. `next start` is Node and cannot
+stand in for it: the connection-lifetime bug described under Deployment passes
+every Node test and breaks every other request on Workers.
 
 Both suites rebuild the app before running, so a green result always reflects
 the working tree rather than whatever was last compiled.
@@ -304,10 +395,16 @@ tests/, e2e/                      see Testing above
 
 These are real and current, not hypotheticals.
 
-- **No production deployment yet.** The app is verified locally end to end
-  against Postgres and in five simultaneous browsers, but no hosted instance
-  exists: this environment has no Vercel or Supabase credentials. Deploying is
-  the documented steps above and takes a few minutes.
+- **No production deployment yet.** The app is verified against the real
+  Cloudflare Workers runtime locally — the full suite plus a class-scale load
+  test and a stream-cycling soak all run on `workerd` — but no hosted instance
+  exists. This environment has no Cloudflare credentials and cannot reach
+  `api.cloudflare.com`, so the deploy itself has to be run by someone who can.
+  The steps are in Deployment above and `npm run cf:check` verifies the
+  configuration before you try.
+- **Workers Paid ($5/month) is required.** The Free plan's 50 subrequests per
+  invocation and Hyperdrive's 100k queries/day both break under a single class;
+  the reasoning and numbers are under Deployment.
 - **Rooms are never cleaned up.** There is no retention policy or expiry job.
   Rows accumulate; for a handful of classes this does not matter.
 - **A lost instructor cookie needs the instructor link.** The instructor

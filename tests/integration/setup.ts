@@ -96,12 +96,19 @@ async function waitForServer(url: string, child: ChildProcess | null): Promise<v
 }
 
 export default async function globalSetup() {
-  const testUrl = await ensureTestDatabase();
-  process.env.CC_TEST_DATABASE_URL = testUrl;
-
+  // When the suite is pointed at a server someone else started — the Workers
+  // runtime, say — that server owns its database and has told us which one.
+  // Recomputing it here would silently aim the tests that read the database
+  // directly at a different one than the server under test is writing to.
   if (process.env.CC_TEST_BASE_URL) {
+    if (!process.env.CC_TEST_DATABASE_URL) {
+      process.env.CC_TEST_DATABASE_URL = await ensureTestDatabase();
+    }
     return async () => {};
   }
+
+  const testUrl = await ensureTestDatabase();
+  process.env.CC_TEST_DATABASE_URL = testUrl;
 
   // A stale server left on the port would be silently tested instead of the
   // build under test, which is exactly the kind of false green that makes a
