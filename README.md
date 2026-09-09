@@ -18,15 +18,19 @@ Three surfaces, one room.
 **Instructor console** (`/r/<CODE>/host`) — private. The join code, link and QR;
 who is in the room and whether they have answered; a poll composer and the live
 distribution; the class pulse; the anonymous question queue; a participant
-picker; and control of what the shared screen displays.
+picker; and one panel, **Presentation screen**, that opens the screen you share
+and says what the class is looking at.
 
 **Learner view** (`/r/<CODE>`) — mobile-first. Join with a name, no account.
 Answer the live poll, set a pulse of *Got it / Shaky / Lost*, ask a question
 anonymously, and upvote other people's questions.
 
-**Shared screen** (`/r/<CODE>/screen`) — read-only, for screen sharing or a
-projector. Join instructions with a QR, the live question, aggregate results
-once the instructor reveals them, or whoever was just picked.
+**Presentation screen** (`/r/<CODE>/screen`) — read-only, for screen sharing or
+a projector. Join instructions with a QR, the live question, aggregate results
+once the instructor reveals them, or whoever was just picked. Opening a
+question, revealing results and picking a participant move it on their own;
+the console always states what is on it, because it is the one tab the
+instructor cannot see while sharing it.
 
 **Session summary** (`/r/<CODE>/summary`) — instructor only. Who joined, how
 many took part, every poll with its distribution, the questions and their
@@ -40,7 +44,7 @@ upvotes, the pulse at the end, and the picker history. Printable.
 | Learner identity | Anonymous session token in an httpOnly cookie, mirrored in `localStorage`. A refresh rejoins the same identity — it never creates a second roster entry. |
 | Roster | Live, private to the instructor: names, presence, and who has been called on. Deliberately no pulse and no per-poll answer flag — see Privacy below. |
 | Polls | Yes/No, A–D multiple choice, confidence 1–5. One poll open at a time. One answer per learner, changeable until close. A closed poll rejects answers. |
-| Reveal | The instructor always sees the live distribution. Learners and the shared screen see it only after **Show results on screen**. |
+| Reveal | The instructor always sees the live distribution. Learners and the presentation screen see it only after **Show results on screen** — choosing the results screen does not reveal anything by itself. |
 | Class pulse | One value per learner, replaced on every tap. The instructor sees aggregate counts and percentages only, never who chose what. |
 | Ask again | Putting an earlier question to the class again starts a fresh round rather than reopening the old one, so the projector never shows the previous distribution as the new one. |
 | Questions | Anonymous by default. One upvote per learner (a toggle, so tapping can never inflate it). The instructor can mark answered, reopen, or remove. |
@@ -425,7 +429,7 @@ are exactly what they cannot cover.
 | 5 | Reconnect | Leave a learner idle 2 min, lock the phone, unlock | Still live, correct state |
 | 6 | Refresh | Reload instructor and learner mid-poll | Same room, same answer, no re-join |
 | 7 | Desktop instructor | Instructor view on the teaching laptop | Readable at the back of the room |
-| 8 | Public view | `/r/<code>/public` on the projector | No roster, no names, no individual answers |
+| 8 | Presentation screen | `/r/<code>/screen` on the projector | No roster, no names, no individual answers |
 | 9 | Physical phone | One iOS and one Android, on mobile data, not Wi-Fi | Join by QR, answer, ask a question |
 
 Item 9 is the one no amount of local testing substitutes for.
@@ -531,8 +535,10 @@ app/
   r/[code]/summary/               session summary
   api/rooms/                      every route handler
 components/host/                  instructor console panels
+  PresentationPanel.tsx           the shared screen: open it, and say what is on it
 lib/
   domain/                         pure classroom rules (no I/O, heavily tested)
+  domain/screen.ts                what the presentation screen is showing, and why
   projections.ts                  the privacy boundary: one builder per role
   service.ts                      every mutation, each a short transaction
   auth.ts                         the two token types and how they are checked
