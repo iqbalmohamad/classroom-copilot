@@ -24,8 +24,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
       return fail("rate_limited", "You have sent several questions already. Give it a moment.");
     }
 
-    const { body, anonymous } = await readJson(req, questionSchema);
-    const result = await submitQuestion(room, participant.id, body, anonymous ?? true);
+    const { body, anonymous, sectionId, activityId } = await readJson(req, questionSchema);
+    const result = await submitQuestion(room, participant.id, body, anonymous ?? true, {
+      sectionId,
+      activityId,
+    });
     return ok(result);
   });
 }

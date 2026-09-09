@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { createRoom } from "@/lib/service";
+import { applyPlanToRoom, loadPlan } from "@/lib/plans";
 import { createRoomSchema } from "@/lib/validation";
 import { handle, ok, readJson, fail } from "@/lib/http";
 import { cookieOptions, hostCookieName } from "@/lib/auth";
@@ -24,8 +25,20 @@ export async function POST(req: Request) {
       return fail("rate_limited", "Too many rooms created. Wait a moment and try again.");
     }
 
-    const { title } = await readJson(req, createRoomSchema);
-    const { room, hostToken } = await createRoom(title);
+    const input = await readJson(req, createRoomSchema);
+
+    // A plan is read before the room exists, so a bad token costs nothing and
+    // leaves no half-built session behind.
+    const plan =
+      input.planId && input.planToken
+        ? await loadPlan(input.planId, input.planToken)
+        : null;
+
+    const { room, hostToken } = await createRoom(input.title ?? plan?.title);
+    // Fresh room, fresh code, fresh host token, and only the instructor's own
+    // preparation copied in: no learner, submission, pulse, vote or pick from
+    // the session the plan came from can reach this one.
+    if (plan) await applyPlanToRoom(room, plan.payload);
 
     const jar = await cookies();
     jar.set(hostCookieName(room.code), hostToken, cookieOptions());
@@ -35,6 +48,7 @@ export async function POST(req: Request) {
       title: room.title,
       hostToken,
       joinUrl: joinUrl(requestOrigin(req), room.code),
+      fromPlan: plan ? { id: plan.id, title: plan.title } : null,
     });
   });
 }

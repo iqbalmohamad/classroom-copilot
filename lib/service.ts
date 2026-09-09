@@ -66,8 +66,17 @@ export async function createRoom(title: string | undefined): Promise<{
         insert into rooms (code, title, host_token_hash)
         values (${code}, ${cleanTitle}, ${hash})
         returning id, code, title, host_token_hash, status, public_mode, version,
-                  created_at, ended_at`;
+                  current_section_id, created_at, ended_at`;
       const room = rows[0]!;
+      // Every room gets one section immediately. An instructor who never opens
+      // the planner simply teaches inside it and never sees the word "section";
+      // one who does has something to rename rather than a blank slate to
+      // configure before the class can start.
+      const section = await sql<{ id: string }[]>`
+        insert into sections (room_id, position, title) values (${room.id}, 1, 'Section 1')
+        returning id`;
+      await sql`update rooms set current_section_id = ${section[0]!.id} where id = ${room.id}`;
+      room.current_section_id = section[0]!.id;
       await logEvent(sql, room.id, "room_created", { title: cleanTitle });
       return { room, hostToken };
     } catch (error) {
@@ -183,25 +192,134 @@ export async function joinRoom(
   });
 }
 
+/**
+ * Opens a new pulse round, closing whichever one was collecting.
+ *
+ * This replaces the old "reset": erasing every learner's answer destroyed the
+ * before half of a before-and-after comparison, which is the main reason to ask
+ * twice. A round is the thing that starts empty; the previous one keeps its
+ * counts for the rest of the session and in the summary.
+ */
+export async function startPulseRound(
+  room: RoomRow,
+  options: { label?: string; sectionId?: string | null } = {},
+): Promise<{ id: string; seq: number }> {
+  assertRoomOpen(room);
+
+  return sql.begin(async (tx) => {
+    await lockRoom(tx, room.id);
+    const sectionId = await resolveSection(tx, room, options.sectionId ?? undefined);
+
+    await tx`update pulse_rounds set status = 'closed', closed_at = now()
+             where room_id = ${room.id} and status = 'open'`;
+
+    const seqRows = await tx<{ next: number }[]>`
+      select coalesce(max(seq), 0) + 1 as next from pulse_rounds where room_id = ${room.id}`;
+    const seq = seqRows[0]?.next ?? 1;
+    const label = (options.label ?? "").trim().slice(0, 60) || `Round ${seq}`;
+
+    const rows = await tx<{ id: string }[]>`
+      insert into pulse_rounds (room_id, section_id, seq, label)
+      values (${room.id}, ${sectionId}, ${seq}, ${label})
+      returning id`;
+
+    await logEvent(tx, room.id, "pulse_round_started", { seq, sectionId });
+    return { id: rows[0]!.id, seq };
+  });
+}
+
+/**
+ * Records one learner's pulse in the round that is collecting.
+ *
+ * `expectedRoundId` is what the learner's phone believed was open. A tap that
+ * was already in flight when the instructor moved on must not land in the new
+ * round and quietly claim the class understood something it has not been shown
+ * yet, so a mismatch is refused rather than redirected.
+ */
 export async function setPulse(
   room: RoomRow,
   participantId: string,
   pulse: PulseValue,
-): Promise<void> {
+  expectedRoundId?: string | null,
+): Promise<{ roundId: string }> {
   assertRoomOpen(room);
-  // A single column per participant: repeated taps replace, they never add up.
-  const updated = await sql`
-    update participants set pulse = ${pulse}, pulse_at = now(), last_seen_at = now()
-    where id = ${participantId} and room_id = ${room.id}
-    returning id`;
-  if (updated.length === 0) throw new ApiError("not_found", "You are no longer in this room.");
-  await logEvent(sql, room.id, "pulse_set", { pulse });
+
+  return sql.begin(async (tx) => {
+    // Participants before rooms, always: setPulse and respondToPoll both touch
+    // the room through a version trigger, and taking the two in a different
+    // order in one of them is how the same learner deadlocks against themselves.
+    const alive = await tx<{ id: string }[]>`
+      update participants set last_seen_at = now()
+      where id = ${participantId} and room_id = ${room.id}
+      returning id`;
+    if (alive.length === 0) throw new ApiError("not_found", "You are no longer in this room.");
+
+    let round = (
+      await tx<{ id: string }[]>`
+        select id from pulse_rounds
+        where room_id = ${room.id} and status = 'open'
+        order by seq desc limit 1 for share`
+    )[0];
+
+    if (!round) {
+      // Quick-start: the instructor never opened a round, the class just tapped.
+      await lockRoom(tx, room.id);
+      const seqRows = await tx<{ next: number }[]>`
+        select coalesce(max(seq), 0) + 1 as next from pulse_rounds where room_id = ${room.id}`;
+      const seq = seqRows[0]?.next ?? 1;
+      const created = await tx<{ id: string }[]>`
+        insert into pulse_rounds (room_id, section_id, seq, label)
+        values (${room.id}, ${room.current_section_id}, ${seq}, ${`Round ${seq}`})
+        on conflict do nothing
+        returning id`;
+      round =
+        created[0] ??
+        (
+          await tx<{ id: string }[]>`
+            select id from pulse_rounds where room_id = ${room.id} and status = 'open' limit 1`
+        )[0];
+      if (!round) throw new ApiError("conflict", "The pulse is not open right now.");
+    }
+
+    if (expectedRoundId && expectedRoundId !== round.id) {
+      throw new ApiError(
+        "conflict",
+        "The class has moved on to a new pulse. Your last answer was not counted — tap again.",
+      );
+    }
+
+    await tx`
+      insert into pulse_responses (round_id, participant_id, room_id, value)
+      values (${round.id}, ${participantId}, ${room.id}, ${pulse})
+      on conflict (round_id, participant_id)
+      do update set value = excluded.value, updated_at = now()`;
+
+    await logEvent(tx, room.id, "pulse_set", { pulse });
+    return { roundId: round.id };
+  });
 }
 
-export async function clearPulses(room: RoomRow): Promise<void> {
-  await sql`update participants set pulse = null, pulse_at = null
-            where room_id = ${room.id} and pulse is not null`;
-  await logEvent(sql, room.id, "pulse_reset");
+/**
+ * Ensures the room has a section for something to belong to, and validates any
+ * section the caller named actually belongs to this room.
+ */
+export async function resolveSection(
+  tx: Db,
+  room: RoomRow,
+  sectionId?: string | null,
+): Promise<string | null> {
+  if (sectionId) {
+    const rows = await tx<{ id: string }[]>`
+      select id from sections where id = ${sectionId} and room_id = ${room.id}`;
+    if (rows[0]) return rows[0].id;
+    throw new ApiError("bad_request", "That section is not part of this class.");
+  }
+  if (room.current_section_id) return room.current_section_id;
+
+  const existing = await tx<{ id: string }[]>`
+    select id from sections where room_id = ${room.id} order by position asc limit 1`;
+  if (existing[0]) return existing[0].id;
+  return null;
 }
 
 // ------------------------------------------------------------------- polls
@@ -380,21 +498,46 @@ export async function respondToPoll(
 
 // --------------------------------------------------------------- questions
 
+/**
+ * Records a question, with the context the learner was in when they asked.
+ *
+ * The section and activity are written once and never rewritten, so moving the
+ * class on cannot relabel what somebody asked twenty minutes ago. A context
+ * that does not belong to this room — a phone a version behind during a section
+ * change — is dropped to "general" rather than rejected: losing the question
+ * would be worse than losing its label.
+ */
 export async function submitQuestion(
   room: RoomRow,
   participantId: string,
   body: string,
   anonymous: boolean,
+  context: { sectionId?: string | null; activityId?: string | null } = {},
 ): Promise<{ id: string }> {
   assertRoomOpen(room);
   const text = body.trim();
   if (text.length < 2) throw new ApiError("bad_request", "Please write a question first.");
 
+  const [section, activity] = await Promise.all([
+    context.sectionId
+      ? sql<{ id: string }[]>`
+          select id from sections where id = ${context.sectionId} and room_id = ${room.id}`
+      : Promise.resolve([] as { id: string }[]),
+    context.activityId
+      ? sql<{ id: string; section_id: string | null }[]>`
+          select id, section_id from activities
+          where id = ${context.activityId} and room_id = ${room.id}`
+      : Promise.resolve([] as { id: string; section_id: string | null }[]),
+  ]);
+
+  const activityId = activity[0]?.id ?? null;
+  const sectionId = section[0]?.id ?? activity[0]?.section_id ?? null;
+
   const rows = await sql<{ id: string }[]>`
-    insert into questions (room_id, participant_id, body, is_anonymous)
-    values (${room.id}, ${participantId}, ${text}, ${anonymous})
+    insert into questions (room_id, participant_id, body, is_anonymous, section_id, activity_id)
+    values (${room.id}, ${participantId}, ${text}, ${anonymous}, ${sectionId}, ${activityId})
     returning id`;
-  await logEvent(sql, room.id, "question_submitted", { anonymous });
+  await logEvent(sql, room.id, "question_submitted", { anonymous, sectionId, activityId });
   return { id: rows[0]!.id };
 }
 
