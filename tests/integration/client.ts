@@ -64,12 +64,16 @@ export class Client {
     return { status: response.status, body: body as T };
   }
 
-  get(path: string) {
-    return this.request(path);
+  get<T = unknown>(path: string) {
+    return this.request<T>(path);
   }
 
   post<T = unknown>(path: string, body?: unknown) {
     return this.request<T>(path, { method: "POST", body });
+  }
+
+  patch<T = unknown>(path: string, body?: unknown) {
+    return this.request<T>(path, { method: "PATCH", body });
   }
 
   delete<T = unknown>(path: string) {
