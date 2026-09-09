@@ -375,6 +375,34 @@ that only knows the code, and mobile overflow and touch-target size.
 the event stream blocked outright, a phone dropping offline mid-lesson, a
 backgrounded tab, and the shared screen losing its connection.
 
+**Verified against the Cloudflare Workers runtime.** `npm run test:workers`
+runs the integration and browser suites on `workerd` — 92 integration tests and
+9 browser scenarios — with the database reached through the Hyperdrive binding.
+On top of that, on `workerd`:
+
+| | |
+| --- | --- |
+| 40 simultaneous joins | 722ms, 0 failures, 40 distinct names |
+| poll reaching all 40 phones | 498ms first, 549ms median |
+| 40 simultaneous answers | 559ms, 0 failures, tally exactly 40 |
+| stream cycling, 160s | 3 clean cycles, 0 errors, transport never left "Live" |
+
+And a **30-minute rehearsal** with one instructor, forty learners and a shared
+screen, running 36 poll rounds with pulse changes, questions, upvotes and a pick
+each round:
+
+| | |
+| --- | --- |
+| polls delivered to all 40 | every round, 36 of 36 |
+| delivery latency | median 940ms, worst 1148ms |
+| stream connections opened | 1,554, zero errors |
+| HTTP requests | 3,319, zero failures |
+| database connections | flat at 42 throughout, 0 once clients left |
+
+The flat connection count is the one that matters: on Workers each request opens
+its own connection, so a missed cleanup shows up here as a number that climbs.
+It did not, and everything was released afterwards.
+
 **Verified by hand at class scale.** Forty learners, each holding a live stream,
 against one server: forty simultaneous joins in ~400ms with forty distinct
 names, a poll reaching every phone in 67–120ms, forty simultaneous answers in
