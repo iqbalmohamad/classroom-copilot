@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { join } from "node:path";
 import postgres from "postgres";
 import { config } from "dotenv";
 
@@ -9,6 +10,8 @@ import { config } from "dotenv";
  * the web server command instead: Playwright starts that before this file runs,
  * so building here would serve the previous revision.
  */
+const TSX = join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
+
 config({ path: ".env.local" });
 config({ path: ".env" });
 
@@ -31,7 +34,9 @@ export default async function globalSetup() {
     await sql.end();
   }
 
-  execFileSync("npx", ["tsx", "scripts/migrate.ts"], {
+  // tsx's own entry point rather than npx: npx is npx.cmd on Windows and
+  // execFile will not resolve it without a shell.
+  execFileSync(process.execPath, [TSX, "scripts/migrate.ts"], {
     stdio: "pipe",
     env: { ...process.env, DATABASE_URL: testUrl },
   });

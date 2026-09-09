@@ -20,6 +20,13 @@ import { config } from "dotenv";
 config({ path: ".env.local" });
 config({ path: ".env" });
 
+const bin = (...parts: string[]) => join(process.cwd(), "node_modules", ...parts);
+/**
+ * Package entry points are run with the current Node binary rather than through
+ * npm or npx, which are .cmd shims on Windows that execFile cannot resolve.
+ */
+const NEXT_BIN = bin("next", "dist", "bin", "next");
+
 const PORT = Number(process.env.CC_TEST_PORT ?? 3311);
 export const BASE_URL = process.env.CC_TEST_BASE_URL ?? `http://127.0.0.1:${PORT}`;
 
@@ -54,7 +61,9 @@ async function ensureTestDatabase(): Promise<string> {
     await sql.end();
   }
 
-  execFileSync("npx", ["tsx", "scripts/migrate.ts"], {
+  // tsx's own entry point rather than npx, which is npx.cmd on Windows and
+  // cannot be resolved by execFile without a shell.
+  execFileSync(process.execPath, [bin("tsx", "dist", "cli.mjs"), "scripts/migrate.ts"], {
     stdio: "pipe",
     env: { ...process.env, DATABASE_URL: testUrl },
   });
@@ -124,17 +133,17 @@ export default async function globalSetup() {
   // reflect code that no longer exists — the same class of false confidence the
   // port check above exists to prevent, one step earlier.
   // CC_SKIP_BUILD=1 is for tight local iteration when nothing has changed.
-  if (process.env.CC_SKIP_BUILD !== "1") {
-    execFileSync("npm", ["run", "build"], { stdio: "inherit" });
-  } else if (!existsSync(join(process.cwd(), ".next", "BUILD_ID"))) {
-    execFileSync("npm", ["run", "build"], { stdio: "inherit" });
+  if (
+    process.env.CC_SKIP_BUILD !== "1" ||
+    !existsSync(join(process.cwd(), ".next", "BUILD_ID"))
+  ) {
+    execFileSync(process.execPath, [NEXT_BIN, "build"], { stdio: "inherit" });
   }
 
   // Spawn the server binary directly rather than through npx: an npx wrapper
   // becomes a parent process that survives being signalled, which would leave
   // an orphaned server holding the port after the run.
-  const nextBin = join(process.cwd(), "node_modules", "next", "dist", "bin", "next");
-  const child = spawn(process.execPath, [nextBin, "start", "-p", String(PORT)], {
+  const child = spawn(process.execPath, [NEXT_BIN, "start", "-p", String(PORT)], {
     env: {
       ...process.env,
       DATABASE_URL: testUrl,

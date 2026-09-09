@@ -3,6 +3,7 @@
  * Development and test convenience only — never point this at production.
  */
 import { execFileSync } from "node:child_process";
+import { join } from "node:path";
 import postgres from "postgres";
 import { config } from "dotenv";
 
@@ -31,7 +32,13 @@ async function main() {
   `);
   await sql.end();
   console.log("Dropped application tables.");
-  execFileSync("npx", ["tsx", "scripts/migrate.ts"], { stdio: "inherit" });
+  // tsx's entry point, not npx: npx is npx.cmd on Windows and execFile will
+  // not resolve it without a shell.
+  execFileSync(
+    process.execPath,
+    [join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs"), "scripts/migrate.ts"],
+    { stdio: "inherit" },
+  );
 }
 
 void main();
