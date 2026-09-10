@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { api, ApiRequestError } from "@/lib/client/api";
 import { useRoomState } from "@/lib/client/useRoomState";
 import { ConnectionBadge } from "@/components/ConnectionBadge";
@@ -40,8 +41,10 @@ export function HostConsole({
   qr: string | null;
   hostToken: string | null;
 }) {
+  const router = useRouter();
   const { snapshot, connection, refresh } = useRoomState(code, "instructor");
   const [error, setError] = useState<string | null>(null);
+  const [ending, setEnding] = useState(false);
   const [reviewing, setReviewing] = useState<string | null>(null);
 
   const act = useCallback(
@@ -59,6 +62,34 @@ export function HostConsole({
     },
     [code, refresh],
   );
+
+  /**
+   * End the class, then go to the summary — in that order, and only in that
+   * order. Navigation happens on the server's confirmed success, never
+   * optimistically, and nothing here marks the room ended locally: the room
+   * state a surface shows always comes from the server snapshot, so a failed
+   * request cannot leave this console (or anyone's phone) believing the class
+   * ended when it did not.
+   */
+  const endClass = useCallback(async () => {
+    if (!window.confirm("End this class? Learners will no longer be able to respond.")) return;
+    setEnding(true);
+    setError(null);
+    try {
+      // The server treats ending an already-ended class as success, so a retry
+      // whose first attempt actually landed still reaches the summary.
+      await api(`/api/rooms/${code}/end`, { method: "POST", code, role: "instructor" });
+      router.push(`/r/${code}/summary`);
+    } catch (err) {
+      setEnding(false);
+      // Always say what failed and that the class is still running; add the
+      // server's own reason when there is one, because "no network" and "this
+      // browser is no longer signed in as the instructor" need different fixes.
+      const detail = err instanceof ApiRequestError ? ` ${err.message}` : " Try again.";
+      setError(`Could not end the class — you are still live.${detail}`);
+      refresh();
+    }
+  }, [code, refresh, router]);
 
   if (connection === "denied") {
     // A captive portal or a filtered request can produce a single 403 mid-class.
@@ -129,7 +160,11 @@ export function HostConsole({
         </div>
       ) : null}
 
-      {error ? (
+      {/* Errors here are about acting on a live class ("could not end the
+          class — you are still live"). Once the snapshot says the class HAS
+          ended — an end whose response was lost, then discovered by refresh —
+          such an error is stale and now false, so the ended notice wins. */}
+      {error && !ended ? (
         <div className="notice notice-error" role="alert">
           {error}
         </div>
@@ -213,13 +248,10 @@ export function HostConsole({
           {!ended ? (
             <button
               className="btn btn-danger btn-block"
-              onClick={() => {
-                if (window.confirm("End this class? Learners will no longer be able to respond.")) {
-                  void act(`/api/rooms/${code}/end`);
-                }
-              }}
+              disabled={ending}
+              onClick={() => void endClass()}
             >
-              End class
+              {ending ? "Ending…" : "End class"}
             </button>
           ) : null}
         </div>

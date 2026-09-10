@@ -480,6 +480,15 @@ export async function submitActivityResponse(
 
   const outcome = await sql.begin(
     async (tx): Promise<{ answers: Record<string, string> } | Refusal> => {
+      // The advisory lock first — the same discipline as setPulse, for the
+      // same reason. This transaction holds the activity row's share lock
+      // while its insert reaches `rooms` through a version trigger; End Class
+      // settles activities while already holding `rooms`. Those two orders
+      // form a cycle, and the advisory lock is how this codebase removes such
+      // cycles rather than shuffling them around. The submissions it
+      // serialises already queued on the `rooms` row anyway.
+      await lockRoom(tx, room.id);
+
       // Participants before timers/rooms — see the lock-order note in
       // service.ts. It has to come before the enforcement below, which reaches
       // `rooms` through the version triggers on timers and activities.

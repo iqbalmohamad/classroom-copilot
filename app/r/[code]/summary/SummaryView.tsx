@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, ApiRequestError } from "@/lib/client/api";
 import { TallyBars } from "@/components/Bars";
-import { PULSE_LABELS, PULSE_VALUES, POLL_KIND_LABELS, REVIEW_LABELS } from "@/lib/types";
+import { PULSE_DISPLAY_LABELS, PULSE_VALUES, POLL_KIND_LABELS, REVIEW_LABELS } from "@/lib/types";
 import { displayAnswer } from "@/lib/domain/activities";
 import type { SessionSummary } from "@/lib/summary";
 
@@ -18,9 +18,14 @@ import type { SessionSummary } from "@/lib/summary";
 export function SummaryView({ code }: { code: string }) {
   const [summary, setSummary] = useState<SessionSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Bumping this re-runs the fetch: the summary is where the instructor lands
+  // the moment the class ends, often on venue wifi, so one failed request must
+  // not be a dead end.
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    setError(null);
     (async () => {
       try {
         const result = await api<{ summary: SessionSummary }>(`/api/rooms/${code}/summary`, {
@@ -39,7 +44,7 @@ export function SummaryView({ code }: { code: string }) {
     return () => {
       cancelled = true;
     };
-  }, [code]);
+  }, [code, attempt]);
 
   if (error) {
     return (
@@ -48,9 +53,17 @@ export function SummaryView({ code }: { code: string }) {
         <div className="notice notice-error" role="alert">
           {error}
         </div>
-        <Link className="btn" href="/">
-          Back to start
-        </Link>
+        <div className="btn-group">
+          <button className="btn btn-primary" onClick={() => setAttempt((n) => n + 1)}>
+            Try again
+          </button>
+          <Link className="btn" href={`/r/${code}/host`}>
+            Back to console
+          </Link>
+          <Link className="btn" href="/">
+            Back to start
+          </Link>
+        </div>
       </main>
     );
   }
@@ -77,6 +90,9 @@ export function SummaryView({ code }: { code: string }) {
         <div className="row">
           <Link className="btn btn-sm" href={`/r/${code}/host`}>
             Back to console
+          </Link>
+          <Link className="btn btn-sm" href="/">
+            Home
           </Link>
           <button className="btn btn-sm" onClick={() => window.print()}>
             Print
@@ -133,7 +149,7 @@ export function SummaryView({ code }: { code: string }) {
               <div>
                 {PULSE_VALUES.map((value) => (
                   <div className="bar-row" key={value}>
-                    <span className="bar-label">{PULSE_LABELS[value]}</span>
+                    <span className="bar-label">{PULSE_DISPLAY_LABELS[value]}</span>
                     <span className="bar-track">
                       <span
                         className="bar-fill"
@@ -235,7 +251,7 @@ export function SummaryView({ code }: { code: string }) {
           <div>
             {PULSE_VALUES.map((value) => (
               <div className="bar-row" key={value}>
-                <span className="bar-label">{PULSE_LABELS[value]}</span>
+                <span className="bar-label">{PULSE_DISPLAY_LABELS[value]}</span>
                 <span className="bar-track">
                   <span
                     className="bar-fill"

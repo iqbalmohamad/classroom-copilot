@@ -27,6 +27,18 @@ export const PULSE_LABELS: Record<PulseValue, string> = {
   lost: "Lost",
 };
 
+/**
+ * The on-screen form of the pulse labels. Every surface that renders a pulse
+ * choice or result uses these; the CSV export and the AI prompt keep the plain
+ * `PULSE_LABELS` above, because those outputs are data read by other software,
+ * not product UI.
+ */
+export const PULSE_DISPLAY_LABELS: Record<PulseValue, string> = {
+  got_it: "✅ Got it",
+  shaky: "🤔 Shaky",
+  lost: "🆘 Lost",
+};
+
 export const POLL_KIND_LABELS: Record<PollKind, string> = {
   yes_no: "Yes / No",
   multiple_choice: "Multiple choice",

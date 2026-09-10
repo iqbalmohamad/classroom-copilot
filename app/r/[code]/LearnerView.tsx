@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { api, ApiRequestError } from "@/lib/client/api";
 import { learnerToken, rememberedName } from "@/lib/client/tokens";
 import { useRoomState } from "@/lib/client/useRoomState";
@@ -9,7 +10,7 @@ import { TimerChip } from "@/components/TimerChip";
 import { ActivityCard } from "@/components/learner/ActivityCard";
 import { MaterialsCard } from "@/components/learner/MaterialsCard";
 import {
-  PULSE_LABELS,
+  PULSE_DISPLAY_LABELS,
   PULSE_VALUES,
   type LearnerSnapshot,
   type PulseValue,
@@ -192,8 +193,14 @@ function LearnerRoom({ code, onLeave }: { code: string; onLeave: () => void }) {
       </header>
 
       {ended ? (
-        <div className="notice" role="status">
-          This class has ended. Thanks for taking part.
+        <div className="stack-sm">
+          <div className="notice" role="status">
+            Your instructor has ended this class. Thanks for taking part — everything you sent has
+            been kept.
+          </div>
+          <Link className="btn btn-block" href="/">
+            Back to start
+          </Link>
         </div>
       ) : null}
 
@@ -236,7 +243,7 @@ function LearnerRoom({ code, onLeave }: { code: string; onLeave: () => void }) {
         sectionId={snapshot.room.currentSectionId}
         sectionTitle={snapshot.room.currentSectionTitle}
         pulseEpoch={snapshot.room.pulseEpoch}
-        disabled={ended}
+        ended={ended}
         onError={flash}
         onDone={refresh}
       />
@@ -282,7 +289,11 @@ function PollCard({
     return (
       <section className="card">
         <div className="card-title">Question</div>
-        <p className="empty">No question right now. Keep an eye on the screen.</p>
+        <p className="empty">
+          {disabled
+            ? "No question was open when the class ended."
+            : "No question right now. Keep an eye on the screen."}
+        </p>
       </section>
     );
   }
@@ -399,7 +410,7 @@ function PulseCard({
   sectionId,
   sectionTitle,
   pulseEpoch,
-  disabled,
+  ended,
   onError,
   onDone,
 }: {
@@ -414,11 +425,13 @@ function PulseCard({
   /** Which pulse context that section view belongs to — this visit, not an
    *  earlier one, and not the one before an "Ask again". */
   pulseEpoch: number;
-  disabled: boolean;
+  /** The class is over: nothing more is collected, the last answer stays. */
+  ended: boolean;
   onError: (message: string) => void;
   onDone: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const disabled = ended;
 
   async function send(pulse: PulseValue) {
     if (disabled || busy) return;
@@ -455,29 +468,41 @@ function PulseCard({
           class moves on, so without this a learner would be rating one section
           while looking at the next one on the projector. */}
       <p className="tiny muted" style={{ margin: 0 }}>
-        {round
-          ? `About ${round.sectionTitle ?? "this class"} · ${round.label ?? `Round ${round.seq}`}`
-          : `Tap whenever you like — it starts a new round for ${sectionTitle ?? "this class"}.`}
+        {ended
+          ? "The class has ended — your last answer is kept."
+          : round
+            ? `About ${round.sectionTitle ?? "this class"} · ${round.label ?? `Round ${round.seq}`}`
+            : `Tap whenever you like — it starts a new round for ${sectionTitle ?? "this class"}.`}
       </p>
       <div className="pulse-grid">
-        {PULSE_VALUES.map((value) => (
-          <button
-            key={value}
-            type="button"
-            className="pulse-btn"
-            data-value={value}
-            data-active={current === value}
-            aria-pressed={current === value}
-            disabled={disabled || busy}
-            onClick={() => send(value)}
-          >
-            {PULSE_LABELS[value]}
-          </button>
-        ))}
+        {PULSE_VALUES.map((value) => {
+          const selected = current === value;
+          return (
+            <button
+              key={value}
+              type="button"
+              className="pulse-btn"
+              data-value={value}
+              data-active={selected}
+              aria-pressed={selected}
+              disabled={disabled || busy}
+              onClick={() => send(value)}
+            >
+              <span>{PULSE_DISPLAY_LABELS[value]}</span>
+              {/* The tick and the thicker ring (see .pulse-btn CSS) are what
+                  make the choice readable without colour — the emoji cannot be
+                  that signal, since every option has one. Rendered on every
+                  button and shown by CSS, so selecting never shifts layout. */}
+              <span className="pulse-tick" aria-hidden="true">
+                ✓
+              </span>
+            </button>
+          );
+        })}
       </div>
       <p className="tiny muted">
-        Your instructor sees the class totals only — never who chose what. Change it whenever you
-        like.
+        Your instructor sees the class totals only — never who chose what.
+        {ended ? "" : " Change it whenever you like."}
       </p>
     </section>
   );
@@ -578,6 +603,7 @@ function QuestionsCard({
               type="button"
               className={`btn ${about === "here" ? "btn-primary" : ""}`}
               aria-pressed={about === "here"}
+              disabled={disabled}
               onClick={() => setAbout("here")}
             >
               About {activity ? activity.title.slice(0, 28) : (sectionTitle ?? "this section")}
@@ -586,6 +612,7 @@ function QuestionsCard({
               type="button"
               className={`btn ${about === "general" ? "btn-primary" : ""}`}
               aria-pressed={about === "general"}
+              disabled={disabled}
               onClick={() => setAbout("general")}
             >
               General question
@@ -627,7 +654,9 @@ function QuestionsCard({
         Class questions
       </div>
       {openQuestions.length === 0 && answered.length === 0 ? (
-        <p className="empty">No questions yet. Yours can be the first.</p>
+        <p className="empty">
+          {disabled ? "No questions were asked." : "No questions yet. Yours can be the first."}
+        </p>
       ) : (
         <ul className="list">
           {openQuestions.map((question) => (
