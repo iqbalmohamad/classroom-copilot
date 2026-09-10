@@ -1,335 +1,301 @@
-# Current Assignment — M0: Desktop UI/UX Audit
+# Current Assignment — M0: Host Console Live-State Hierarchy Fix
 
-**Status:** READY FOR AUDIT
-**Executor:** ChatGPT Work
-**Type:** Audit only. This is NOT an implementation assignment.
+**Status:** READY FOR IMPLEMENTATION
+**Executor:** Claude Code
+**Type:** Bounded pre-classroom implementation assignment
 **Milestone:** M0 — First Classroom
 **First real classroom target:** September 13, 2026
 **Feature freeze target:** September 12, 2026
 
-This replaces the previous assignment, **M0: End Class + Pulse Polish**, which
-is complete and merged behavior as of commit `474ad39` on
-`claude/m0-end-class-pulse-polish-y18jlv` (see git history of this file and
-`README.md` for what shipped). **That commit is the behavioral baseline for
-this audit** — audit the product as it exists there, not an earlier or later
-state.
+This assignment replaces **M0: Desktop UI/UX Audit**, committed as `0f3d691`.
+The production behavioral baseline remains `474ad39`. Preserve the behavior at
+that baseline except for the three explicitly authorized hierarchy changes in
+this document.
 
 ---
 
-# Purpose
+# Audit decision carried forward
 
-This assignment defines the scope, method, and required output of a desktop
-UI/UX audit of Classroom Copilot, to be carried out by a separate ChatGPT Work
-session.
+The primary desktop audit was performed by ChatGPT Work. A supplemental Codex
+audit completed the missing states and rendered the production application with
+Playwright at exactly:
 
-The audit must inspect the actual implemented desktop experience and
-determine:
+- `1280×720`;
+- `1366×768`;
+- `1440×900`;
+- `1920×1080`.
 
-1. what desktop usability problems actually exist;
-2. where they occur;
-3. who they affect (instructor, learner, or both);
-4. how severe they are;
-5. whether they should be addressed before September 13;
-6. the smallest reasonable fix for each finding;
-7. whether structural redesign is genuinely justified anywhere.
+The completed audit gate concluded:
 
-**Do not assume a redesign is necessary.** The audit must prioritize problems
-that materially affect first-classroom usability. It must not create
-redesign work merely because the current UI could look better.
+`TARGETED DESKTOP FIXES REQUIRED`
 
----
+The audits confirmed one material pre-classroom finding:
 
-# Sources of truth for the auditor
+> **F1 — Preparation and setup displace live classroom work.**
 
-Read before auditing:
+At the two smaller laptop viewports, the active poll's operational controls
+fell below or across the fold. At all four viewports, running activity/review
+state and Timer/Class Pulse were displaced by preparation, invitation, and
+access content. The wider viewports reduced the poll consequence but did not
+resolve the remaining hierarchy problem.
 
-1. `PRD.md` — product intent, scope, principles, milestone boundaries;
-2. `README.md` — what the product does today, its surfaces, and its
-   terminology;
-3. this `Current Assignment.md` — the active audit scope;
-4. the rendered application itself (see **Evidence requirement** below) —
-   source-code review alone is not sufficient.
+No additional P0/P1 issue was found during supplemental verification.
+Structural redesign is **not** justified.
 
-## Terminology
+The empty Participant Picker feedback issue remains:
 
-The PRD and this document use **instructor** and **learner**. Some earlier
-product conversations used **mentor** and **student**; they mean the same
-roles. Use the product's own terms (instructor/learner) in the audit output.
+- severity: `P2 — noticeable usability issue`;
+- timing: `After first classroom`;
+- status for this assignment: **explicitly out of scope**.
+
+Do not restart or broaden the audit.
 
 ---
 
-# Scope
+# Goal
 
-## Surfaces to audit
+When an instructor is actively running a class, content representing what is
+happening **right now** must appear before content used primarily to prepare a
+future action or invite/access the room.
 
-### Instructor
+This is a hierarchy correction, not a visual redesign.
 
-The instructor console at `/r/<CODE>/host`, and specifically:
+Preserve:
 
-- the live class / host console as a whole;
-- the current activity area (open-ended exercises: composing, running,
-  reviewing);
-- polls (composing, opening, live distribution, closing, revealing);
-- confidence controls/results where applicable (the confidence 1–5 poll
-  type);
-- Class Pulse (current round, history, aggregate readout);
-- anonymous questions (the queue, upvote counts, marking answered);
-- participant picker;
-- roster / participant information;
-- timers and supporting live controls;
-- the End Class affordance;
-- the ended-class console (the state the console is in after the class has
-  ended, including one reopened later);
-- Class Summary (`/r/<CODE>/summary`).
+- existing functionality;
+- the existing two-column desktop structure;
+- the existing visual language;
+- existing learner behavior;
+- existing mobile usability;
+- existing realtime behavior;
+- existing navigation;
+- existing data and state semantics.
 
-### Learner
-
-The learner view at `/r/<CODE>`, and specifically:
-
-- the live class view as a whole;
-- the current activity (answering an open-ended exercise);
-- poll answering;
-- confidence input;
-- Class Pulse (choosing and changing a pulse value);
-- anonymous questions (asking, upvoting);
-- the ended-class state;
-- feedback and revealed-result states currently permitted by the product
-  (private instructor feedback on a submission; a poll's revealed
-  distribution once the instructor shows it).
-
-### Shared / supporting
-
-Where relevant to either surface above:
-
-- the home/start surface (`/`);
-- navigation between live class, summary, and home;
-- loading states;
-- empty states;
-- failure states;
-- reconnecting states;
-- ended states.
-
-Do not evaluate speculative future features or optional AI functionality
-(the AI Class Read panel is explicitly out of scope for this audit).
-
-## Required desktop viewports
-
-Inspect the rendered application at realistic desktop/laptop sizes. At
-minimum:
-
-- `1280×720`
-- `1366×768`
-- `1440×900`
-- `1920×1080`
-
-Narrower desktop windows may also be inspected when useful.
-
-Mobile is not the primary subject of this audit, but any recommendation must
-not knowingly regress existing learner mobile usability.
+Do not create a new dashboard, navigation model, or classroom interaction
+model.
 
 ---
 
-# Audit dimensions
+# Sources of truth
 
-Evaluate at least the following dimensions. These are lenses to apply across
-every surface above, not a separate checklist to run once.
+Before implementation, read:
 
-## Information hierarchy
+1. `PRD.md` for product intent and milestone constraints;
+2. `README.md` for current product behavior and terminology;
+3. this document for the only authorized implementation scope;
+4. the implementation at behavioral baseline `474ad39`.
 
-Is the most important classroom task/state visually dominant?
-
-For instructors, consider things such as: what is happening right now;
-learner responses; current room state; primary live actions.
-
-For learners, consider: what they are expected to do now.
-
-## Screen-space usage
-
-Inspect: unused horizontal space; unnecessarily narrow content; excessive
-vertical stacking; unnecessary scrolling; cramped panels; poor use of
-available desktop space.
-
-Do not assume that using more width automatically means better design.
-
-## Action clarity
-
-Review whether primary, secondary, and destructive actions are clearly
-distinguishable and appropriately placed.
-
-## Density and readability
-
-Inspect: card density; spacing; typography; grouping; line length; repeated
-visual containers; list/table readability.
-
-## Classroom awareness
-
-For instructors, ask whether the interface makes it easy to understand:
-
-- What is happening right now?
-- What are learners doing?
-- Is anything waiting for my action?
-- Who appears to be struggling?
-- What should I do next?
-
-For learners, ask:
-
-- What am I expected to do?
-- Has my response been accepted?
-- Is the class still active?
-- What can I do now?
-
-## State clarity
-
-Evaluate how clearly the following states are communicated: loading; empty;
-live; submitted; closed; revealed; failed; reconnecting; ended.
-
-Important state should not depend on subtle styling alone.
-
-## Consistency
-
-Review reasonable consistency of: spacing; controls; cards; typography;
-status treatment; navigation; terminology.
-
-Do not turn this into a design-system project.
-
-## Accessibility-related usability
-
-Flag obvious issues such as: state communicated only through color; weak
-focus visibility; tiny interactive targets; poor hierarchy; visibly weak
-contrast; difficult readability.
-
-This is not a formal WCAG audit.
+If another document or an implementation idea suggests broader work, this
+assignment controls. Prefer the narrowest change that satisfies the acceptance
+criteria and protects the September 13 classroom.
 
 ---
 
-# Evidence requirement
+# Authorized implementation scope
 
-The audit must inspect the actual rendered application. Source-code review
-alone is insufficient. Use realistic classroom/test states and gather
-screenshots or equivalent visual evidence where useful.
+This assignment contains **exactly three hierarchy changes**.
 
-Representative states should include, where possible:
+## 1. Poll hierarchy
 
-- idle live class;
-- active poll;
-- active activity;
-- Class Pulse (with responses recorded);
-- questions containing realistic content;
-- summary containing results;
-- ended class.
+When a poll is active or otherwise has current operational state that the
+instructor needs to manage, place the **current poll** and its relevant
+operational information/actions before the **new-poll composer** in desktop
+host-console reading order.
 
-Every meaningful finding must identify the actual surface/state where it was
-observed. Generic UX recommendations without evidence are not sufficient.
+Existing current-poll content to prioritize includes, where applicable:
 
----
+- poll prompt;
+- response count and results state;
+- `Close poll`;
+- reveal/show-results action;
+- other existing current-poll operational controls.
 
-# Finding format
+The instructor must not have to pass a large new-poll preparation form before
+reaching the poll already being operated.
 
-Every meaningful finding must contain:
+Do not redesign poll functionality or add poll features.
 
-**Finding** — what is wrong.
+## 2. Activity hierarchy
 
-**Evidence** — where and how it appears in the rendered product (surface,
-state, viewport).
+When an activity is running or has responses requiring instructor review,
+place the **running/current activity state** before the **activity composer** in
+desktop host-console reading order.
 
-**User impact** — how it affects instructor or learner behavior.
+Prioritize existing information and actions such as:
 
-**Severity** — use exactly one of:
+- current activity;
+- running or closed state;
+- response count;
+- review entry;
+- follow-up indicators;
+- existing activity controls.
 
-- `P0 — blocks classroom use`
-- `P1 — materially harms classroom operation`
-- `P2 — noticeable usability issue`
-- `P3 — polish`
+The audit specifically reproduced the case where an activity was created with
+additional options and the expanded, now-empty composer remained above the
+running activity. Preparation UI must not unnecessarily displace the live
+activity or its review entry.
 
-**Recommended timing** — use exactly one of:
+Use the smallest solution consistent with the current component architecture.
+Do not create a new activity workflow or redesign response review.
 
-- `Before Sep 13`
-- `After first classroom`
+## 3. Supporting-column live-state hierarchy
 
-**Smallest reasonable fix** — the minimum intervention that addresses the
-issue. Do not default to redesign.
+In the desktop supporting column, place live classroom controls and signals
+ahead of the large invitation/instructor-access content.
 
----
+Specifically:
 
-# Deadline prioritization
+1. `Timer` must appear before the invitation/instructor-access panel.
+2. `Class Pulse` must appear before the invitation/instructor-access panel.
 
-The September 13 first-classroom deadline controls prioritization. Recommend
-implementation before the first classroom only when a problem materially
-affects:
+Invitation and access information must remain available and usable. Do not
+remove or weaken:
 
-- instructor ability to operate the class;
-- learner ability to understand or respond;
-- important state visibility;
-- reliability perception;
-- severe readability/usability.
+- the join code;
+- learner invitation functionality;
+- presentation access;
+- instructor access information required by the existing product.
 
-Cosmetic modernization, aesthetic improvements, and non-essential layout
-optimization should normally wait until after first classroom use.
-
----
-
-# Alternative layouts
-
-Up to two alternative desktop layout directions may be proposed, but **only
-if actual evidence shows a meaningful structural layout problem**. Possible
-hypotheses to test against evidence (not conclusions to assume):
-
-- **Instructor** — the current classroom activity receives the dominant
-  working area while supporting controls and participant information
-  occupy a secondary region.
-- **Learner** — the currently expected action receives dominant focus.
-- **Summary** — the most decision-useful results appear before supporting
-  detail.
-
-These are hypotheses only. Do not force a sidebar, two-column layout, or
-structural redesign unless evidence justifies it. Do not implement any
-alternative during the audit.
+This change is ordering and priority only, not feature removal.
 
 ---
 
-# Required final output of the audit
+# Implementation constraints
 
-1. Executive assessment of current desktop usability.
-2. Evidence-backed findings, in the format above.
-3. P0/P1/P2/P3 prioritization of every finding.
-4. Explicit `Before Sep 13` vs `After first classroom` classification of
-   every finding.
-5. Smallest reasonable fix for every finding.
-6. One final verdict, exactly one of:
-   - `NO DESKTOP CHANGE REQUIRED BEFORE FIRST CLASS`
-   - `TARGETED DESKTOP FIXES REQUIRED`
-   - `STRUCTURAL DESKTOP REDESIGN JUSTIFIED`
-7. If targeted fixes are recommended: a proposed bounded implementation
-   scope.
-8. If structural redesign is justified: evidence showing why targeted
-   CSS/layout changes would be insufficient.
+- Keep the existing two-column desktop host-console structure.
+- Reuse the current components, actions, state, and styling wherever possible.
+- Do not introduce a new dashboard, sidebar, tab system, or modal workflow.
+- Do not change poll, activity, Timer, Pulse, invitation, access, End Class, or
+  Summary semantics.
+- Do not change APIs, persistence, migrations, authorization, or room-state
+  contracts unless an unavoidable implementation blocker is demonstrated.
+- Do not make unrelated visual-polish or refactoring changes.
+- Do not include the Participant Picker P2 issue.
+- Do not alter learner-facing functionality as part of this assignment.
 
 ---
 
-# Explicitly out of scope for the audit
+# Responsive behavior
 
-The audit must not:
+Validate the implementation at exactly:
 
-- implement UI changes;
-- modify product behavior;
-- change End Class behavior;
-- change Class Pulse behavior;
-- add AI functionality;
-- add new learner features;
-- redesign anything mobile;
-- rebuild the design system;
-- perform broad refactoring;
-- rewrite `PRD.md`;
-- do speculative future-product work.
+- `1280×720`;
+- `1366×768`;
+- `1440×900`;
+- `1920×1080`.
 
-The audit is analysis and recommendations only. Implementation of any
-finding is a separate, later assignment.
+The two smaller laptop sizes are especially important because the audit found
+the strongest operational consequence there. Do not infer one viewport's
+result from another; render and inspect all four.
+
+## Mobile protection
+
+Do not knowingly regress learner mobile behavior.
+
+Also inspect whether changing host-console component or DOM order affects a
+narrow/mobile host layout. Prefer the smallest responsive implementation that
+improves desktop hierarchy without creating an inferior narrow layout. Do not
+introduce a broad responsive redesign.
 
 ---
 
-# Stop condition
+# Acceptance criteria
 
-The audit is complete when the required final output above has been
-produced. It does not implement anything. A subsequent assignment, scoped
-from the audit's findings, will cover implementation of any `Before Sep 13`
-targeted fixes — bounded the same way this document bounds this one.
+The implementation is complete only when all of the following are satisfied:
+
+1. At `1280×720`, current poll state and its operational controls receive
+   higher reading priority than the new-poll composer.
+2. At `1366×768`, the same hierarchy holds.
+3. At `1440×900`, the same hierarchy remains coherent.
+4. At `1920×1080`, the same hierarchy remains coherent.
+5. A running activity and its response/review entry appear before the activity
+   composer.
+6. An expanded or empty activity composer does not unnecessarily push the
+   running activity below preparation UI.
+7. Timer appears before the invitation/instructor-access panel in the desktop
+   supporting column.
+8. Class Pulse appears before the invitation/instructor-access panel.
+9. Invitation and access functionality remain available.
+10. Existing poll behavior is unchanged.
+11. Existing activity behavior is unchanged.
+12. Existing Timer behavior is unchanged.
+13. Existing Pulse behavior is unchanged.
+14. Existing End Class behavior is unchanged.
+15. Existing realtime behavior is unchanged.
+16. Existing Summary and navigation behavior is unchanged.
+17. The existing learner experience is not materially changed.
+18. Existing automated test suites remain green.
+
+---
+
+# Verification requirements
+
+Source review and automated assertions alone are insufficient. Inspect the
+rendered result with the repository's existing browser automation/Playwright
+capability where practical.
+
+At each of the four required desktop viewports, verify a populated live class
+containing at minimum:
+
+- a current/open poll and its operational controls;
+- a running activity with at least one response/review state;
+- an active or populated Class Pulse;
+- a Timer;
+- invitation and instructor-access content.
+
+Record reliable rendered evidence for each viewport. Confirm the intended
+reading order and whether the important current-state controls can be reached
+without passing the preparation/setup content they govern.
+
+Also verify:
+
+- a narrow/mobile host layout after any DOM-order change;
+- representative learner mobile behavior;
+- End Class behavior;
+- Summary and navigation;
+- realtime propagation for the affected live states;
+- all existing automated test suites relevant to the changed components.
+
+If validation reveals an unrelated issue, report it separately. Do not expand
+this implementation to fix it.
+
+---
+
+# Explicitly out of scope
+
+Do not:
+
+- perform another broad UI/UX audit;
+- structurally redesign the instructor console;
+- create a new dashboard or interaction model;
+- change product functionality;
+- add new poll, activity, Timer, Pulse, invitation, or access features;
+- implement the Participant Picker P2 finding;
+- change learner-facing workflows;
+- change the Public/Projector experience except where existing behavior must be
+  preserved and verified;
+- change End Class or Summary behavior;
+- change APIs, database schema, migrations, deployment configuration, or
+  production infrastructure;
+- bundle unrelated cleanup, refactoring, styling, or cosmetic modernization;
+- deploy as part of this assignment.
+
+---
+
+# Required implementation report
+
+When implementation is complete, report:
+
+1. files changed;
+2. how each of the three authorized hierarchy changes was implemented;
+3. rendered verification result at each required viewport;
+4. narrow/mobile host-layout result;
+5. learner mobile protection result;
+6. automated tests run and their results;
+7. confirmation that invitation/access, End Class, realtime, Summary, and
+   navigation behavior remain intact;
+8. any blocker or acceptance criterion not satisfied;
+9. confirmation that no out-of-scope work was included.
+
+Stop after this bounded assignment. Do not begin broader redesign or backlog
+work.
