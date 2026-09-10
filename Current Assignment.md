@@ -1,383 +1,335 @@
-# Current Assignment — M0: End Class + Pulse Polish
+# Current Assignment — M0: Desktop UI/UX Audit
 
-**Status:** READY FOR IMPLEMENTATION
+**Status:** READY FOR AUDIT
+**Executor:** ChatGPT Work
+**Type:** Audit only. This is NOT an implementation assignment.
 **Milestone:** M0 — First Classroom
-**Target live usage:** September 13, 2026
-**Feature freeze:** September 12, 2026 — this assignment must be implemented and through QA before the freeze. After the freeze, only bug fixes from this assignment's QA are allowed.
+**First real classroom target:** September 13, 2026
+**Feature freeze target:** September 12, 2026
 
-This replaces the previous M0 implementation assignment, which is complete
-(see git history of this file and `README.md` for what shipped). The
-engineering priorities and constraints of that assignment still apply and are
-restated below where they matter.
-
----
-
-# Role
-
-You are the implementation engineer for Classroom Copilot. The Product Owner
-teaches a real live class with this product on September 13, 2026.
-
-Optimize, in order, for:
-
-1. reliability in a real classroom;
-2. mandatory M0 behavior;
-3. realtime correctness;
-4. refresh/reconnect resilience;
-5. mobile learner usability;
-6. avoiding unnecessary scope before first classroom use.
-
-Do not introduce optional AI work. Do not start a desktop redesign — a
-dedicated desktop UI/UX audit will be created as a separate assignment after
-this one passes QA.
+This replaces the previous assignment, **M0: End Class + Pulse Polish**, which
+is complete and merged behavior as of commit `474ad39` on
+`claude/m0-end-class-pulse-polish-y18jlv` (see git history of this file and
+`README.md` for what shipped). **That commit is the behavioral baseline for
+this audit** — audit the product as it exists there, not an earlier or later
+state.
 
 ---
 
-# Sources of Truth
+# Purpose
 
-Read before implementation:
+This assignment defines the scope, method, and required output of a desktop
+UI/UX audit of Classroom Copilot, to be carried out by a separate ChatGPT Work
+session.
+
+The audit must inspect the actual implemented desktop experience and
+determine:
+
+1. what desktop usability problems actually exist;
+2. where they occur;
+3. who they affect (instructor, learner, or both);
+4. how severe they are;
+5. whether they should be addressed before September 13;
+6. the smallest reasonable fix for each finding;
+7. whether structural redesign is genuinely justified anywhere.
+
+**Do not assume a redesign is necessary.** The audit must prioritize problems
+that materially affect first-classroom usability. It must not create
+redesign work merely because the current UI could look better.
+
+---
+
+# Sources of truth for the auditor
+
+Read before auditing:
 
 1. `PRD.md` — product intent, scope, principles, milestone boundaries;
-2. this `Current Assignment.md` — the active engineering work;
-3. `README.md` — what the product does today and how to run and test it.
-
-If they appear inconsistent, do not silently expand scope. Prefer the narrower
-interpretation that protects the September 13 classroom delivery.
+2. `README.md` — what the product does today, its surfaces, and its
+   terminology;
+3. this `Current Assignment.md` — the active audit scope;
+4. the rendered application itself (see **Evidence requirement** below) —
+   source-code review alone is not sufficient.
 
 ## Terminology
 
-This assignment uses the product's requested terms **mentor** and **student**.
-In this codebase they map exactly to the existing terms:
-
-- **mentor** = instructor (host token, `/r/<CODE>/host`, `role=instructor`);
-- **student** = learner (learner token, `/r/<CODE>`, `role=learner`).
-
-Implement using the codebase's existing `instructor`/`learner` vocabulary.
-Do not rename identifiers, routes, or roles as part of this assignment.
+The PRD and this document use **instructor** and **learner**. Some earlier
+product conversations used **mentor** and **student**; they mean the same
+roles. Use the product's own terms (instructor/learner) in the audit output.
 
 ---
 
 # Scope
 
-Exactly two workstreams. Nothing else.
+## Surfaces to audit
 
-## Workstream 1 — End Class behavior
+### Instructor
 
-### What already exists — verify and build on it, do not rebuild it
+The instructor console at `/r/<CODE>/host`, and specifically:
 
-- `POST /api/rooms/[code]/end` (`app/api/rooms/[code]/end/route.ts`) →
-  `endRoom` in `lib/service.ts`: closes any open poll, sets
-  `rooms.status = 'ended'` and `ended_at`, logs the event. The version
-  trigger bumps `rooms.version`, so every connected client receives the ended
-  snapshot over the existing realtime transport without refresh.
-- `assertRoomOpen` (`lib/service.ts`, `lib/workflow.ts`) refuses every
-  mutation against an ended room with HTTP 410 and the message
-  "This class session has ended." — this is the server-side backstop and it
-  already guards polls, pulse, questions, votes, activities, timers,
-  materials, sections, and picks.
-- All three surfaces already render an ended state: the host console shows a
-  notice and disables its panels (`app/r/[code]/host/HostConsole.tsx`), the
-  learner view shows "This class has ended. Thanks for taking part." and
-  passes `disabled` to every input card (`app/r/[code]/LearnerView.tsx`), and
-  the presentation screen shows a closing message
-  (`app/r/[code]/screen/PublicView.tsx`).
-- Joining an ended room is refused with 410; the instructor's summary stays
-  readable after the end (`tests/integration/room-lifecycle.test.ts`); one
-  e2e test proves the connected learner flips to ended without refresh
-  (`e2e/classroom.spec.ts`, "ends the class cleanly for everyone still
-  connected").
+- the live class / host console as a whole;
+- the current activity area (open-ended exercises: composing, running,
+  reviewing);
+- polls (composing, opening, live distribution, closing, revealing);
+- confidence controls/results where applicable (the confidence 1–5 poll
+  type);
+- Class Pulse (current round, history, aggregate readout);
+- anonymous questions (the queue, upvote counts, marking answered);
+- participant picker;
+- roster / participant information;
+- timers and supporting live controls;
+- the End Class affordance;
+- the ended-class console (the state the console is in after the class has
+  ended, including one reopened later);
+- Class Summary (`/r/<CODE>/summary`).
 
-The work below is the gap between that and the required behavior.
+### Learner
 
-### Mentor (instructor)
+The learner view at `/r/<CODE>`, and specifically:
 
-When the mentor's End Class action **succeeds** (the `/end` request returned
-success):
+- the live class view as a whole;
+- the current activity (answering an open-ended exercise);
+- poll answering;
+- confidence input;
+- Class Pulse (choosing and changing a pulse value);
+- anonymous questions (asking, upvoting);
+- the ended-class state;
+- feedback and revealed-result states currently permitted by the product
+  (private instructor feedback on a submission; a poll's revealed
+  distribution once the instructor shows it).
 
-1. The class transitions to the ended state (already implemented — keep it).
-2. The mentor is automatically taken to the Class Summary view for that class
-   (`/r/<CODE>/summary`). Navigate only on a confirmed successful response —
-   never optimistically.
-3. Already available session results remain visible on the summary: counts,
-   poll distributions, pulse rounds, activities and their review states,
-   questions, picks — whatever the summary already shows for that class.
-4. If some summary data is still being prepared or still loading, show the
-   summary's existing loading/processing state ("Loading summary…") rather
-   than blocking the navigation or the page. Do not build a new
-   summary-preparation pipeline; the summary is computed on read today and
-   that stays.
-5. The mentor can return to the dashboard (the home page `/`) using the
-   normal product flow. The summary currently links back to the console; make
-   sure a route back to `/` exists from the post-class flow using the
-   existing navigation conventions (a small link/button is enough).
+### Shared / supporting
 
-Auto-navigation applies to the mentor's **own successful End Class action in
-that tab**, and only to it. A console that merely observes the room become
-ended (a second console tab, a console reopened later) shows the existing
-ended notice and keeps the summary reachable — it must not be yanked into a
-navigation it did not initiate.
+Where relevant to either surface above:
 
-### Student (learner)
+- the home/start surface (`/`);
+- navigation between live class, summary, and home;
+- loading states;
+- empty states;
+- failure states;
+- reconnecting states;
+- ended states.
 
-Without requiring a manual refresh (i.e., delivered through the existing
-realtime snapshot):
+Do not evaluate speculative future features or optional AI functionality
+(the AI Class Read panel is explicitly out of scope for this audit).
 
-1. The live class view changes to a clear **Class Ended** state.
-2. Show a clear message equivalent to "Your mentor has ended this class."
-   Using the product's own vocabulary, the required copy is:
-   **"Your instructor has ended this class."** (A short thanks line may
-   follow, matching the existing tone.) The current message does not name the
-   actor; this one must.
-3. Live activities stop accepting new input: poll answers, pulse taps,
-   activity submissions and edits, question submission, and upvotes are all
-   disabled in the UI (mostly already wired via `disabled={ended}` — verify
-   every input, including inside `ActivityCard`). The server's 410 remains
-   the backstop for anything in flight.
-4. Already submitted answers remain preserved and visible: the student's poll
-   answer, their pulse choice, their activity submissions and any private
-   feedback on them, and revealed results they could already see must not
-   disappear when the class ends.
-5. The student can view whatever personal/session summary they are currently
-   permitted to see. Today that is exactly what their own view already
-   shows — their submissions, feedback, and revealed aggregates. **Do not
-   build a new student-facing summary page**, and do not widen student access
-   to the instructor summary.
-6. The student can return to the appropriate home/exit destination: give the
-   ended state a clear way back to the home page `/`, using existing UI
-   conventions.
+## Required desktop viewports
 
-### Ended state must survive re-entry
+Inspect the rendered application at realistic desktop/laptop sizes. At
+minimum:
 
-The ended state must also be correct when the student:
+- `1280×720`
+- `1366×768`
+- `1440×900`
+- `1920×1080`
 
-- **refreshes the page** — a student with an existing session for the room
-  lands directly in the ended class view (not the join form), with their
-  preserved submissions visible;
-- **reconnects after losing connection** — the stream or its polling
-  fallback delivers the ended snapshot; the ended UI appears without user
-  action;
-- **reopens the class URL after the class has ended** — same as refresh for
-  a student who had joined. A visitor who never joined gets the join surface
-  with a clear "this class session has ended" refusal when they try (the 410
-  path — verify the join form surfaces its message legibly, especially on a
-  phone).
+Narrower desktop windows may also be inspected when useful.
 
-The same re-entry correctness applies to the mentor's console and the
-presentation screen: reopening either on an ended class shows the ended
-state, never a live-looking one. In particular, an ended class must not
-present anything as still collecting or still counting down (open activity,
-running timer, open pulse round). Settle these at end time server-side (the
-way `endRoom` already closes open polls) or present them as closed in the
-ended projections — choose the smallest change that makes every surface and
-the summary read correctly; do not build new lifecycle machinery.
-
-### Failure behavior
-
-If the mentor's End Class action fails (network error, server error, denied):
-
-1. do **not** falsely transition anything to ended — no navigation, no ended
-   UI. The room state shown must continue to come from the server snapshot,
-   never from an assumed success;
-2. keep the mentor in the current class view, still live and functional;
-3. show an understandable failure state: a visible error that names the
-   action and makes clear the class is still running (e.g. "Could not end
-   the class — you are still live. Try again."), not a generic toast;
-4. allow the mentor to retry: the End Class control stays available and a
-   second attempt works. If the first attempt actually succeeded but the
-   response was lost, the retry must be harmless (ending an ended room must
-   not error in a way that strands the mentor — treat "already ended" as
-   success).
-
-### In-progress input decision (explicit, for M0)
-
-Do **not** introduce new draft-persistence functionality for this edge case.
-If a student is typing or has selected something but has not submitted it
-when the class ends:
-
-- do not auto-submit it;
-- do not treat it as a submitted answer;
-- disable further live submission as soon as the ended state is received;
-- a submit that was already in flight and is refused by the server (410) gets
-  the understandable ended message, not a raw error.
-
-Anything already successfully submitted before the class ended must remain
-preserved (server-side this is already true; verify the UI never hides it).
-
-## Workstream 2 — Class Pulse polish
-
-### Labels
-
-Keep the existing English labels, but render them consistently as:
-
-- `✅ Got it`
-- `🤔 Shaky`
-- `🆘 Lost`
-
-Apply this anywhere the pulse choice or result is **shown on screen** to the
-mentor or the student:
-
-- the student's three pulse buttons (`app/r/[code]/LearnerView.tsx`);
-- the mentor's Class Pulse panel — current round and earlier rounds
-  (`components/host/PulsePanel.tsx`);
-- the session summary's pulse readouts (`app/r/[code]/summary/SummaryView.tsx`),
-  including its print view.
-
-Labels are defined once in `PULSE_LABELS` (`lib/types.ts`); keep a single
-source of truth for the on-screen form rather than sprinkling emoji through
-components. Two deliberate exceptions, because they are data rather than UI:
-
-- the **CSV export** (`lib/export.ts`) keeps plain-text labels — emoji in CSV
-  risks spreadsheet encoding problems for zero classroom value;
-- the **AI Class Read prompt** (`lib/ai.ts`) keeps plain-text labels.
-
-Do not change `Shaky` to `Not sure` in this assignment.
-
-### Selected state — more than color alone
-
-The student's currently selected pulse option must be visually obvious
-without relying only on color. Today the selection is shown purely by
-color/background/border-color change (`.pulse-btn[data-active="true"]` in
-`app/globals.css`) plus `aria-pressed`. Add a non-color signal using the
-product's existing conventions — an appropriate combination of:
-
-- border weight/treatment;
-- shape/background treatment;
-- icon/text treatment (the poll answer buttons' ✓ tick, `.answer-tick`, is
-  the established convention for "this is yours");
-- selected/pressed state (`aria-pressed` stays).
-
-Acceptance heuristic: the selected option must be identifiable in a grayscale
-screenshot. Note the label emoji do not count as a selection signal — every
-button has one.
-
-Do not redesign the pulse interaction beyond this polish: same three buttons,
-same tap-to-change semantics, same rounds/epoch mechanics, same
-aggregate-only privacy. Keep the touch targets at their current size or
-larger (≥44px), and keep the three buttons fitting a phone width without
-overflow with the emoji added.
+Mobile is not the primary subject of this audit, but any recommendation must
+not knowingly regress existing learner mobile usability.
 
 ---
 
-# Explicitly out of scope
+# Audit dimensions
 
-Do not include in this assignment:
+Evaluate at least the following dimensions. These are lenses to apply across
+every surface above, not a separate checklist to run once.
 
-- broad desktop UI/UX redesign, alternative desktop layouts, or new
-  navigation architecture (a dedicated desktop UI/UX audit follows this
-  assignment after QA);
-- unrelated visual cleanup;
-- new AI features, or any change to AI Class Read beyond the label exception
-  noted above;
-- a new draft-persistence system;
-- unrelated summary redesign (the summary changes only as far as Workstream 1
-  requires: reachable after end, correct ended reading, a route home);
-- renaming `Shaky`;
-- refactors not needed to complete this behavior safely;
-- anything in `PRD.md` §15 (M0 non-goals) or the standing exclusions in
-  `README.md` (no accounts, no LMS, no SQL execution engine, no automated
-  grading, no chat or video, no AI that acts on the classroom).
+## Information hierarchy
 
----
+Is the most important classroom task/state visually dominant?
 
-# Verification
+For instructors, consider things such as: what is happening right now;
+learner responses; current room state; primary live actions.
 
-## Required setup — two simultaneous clients, minimum
+For learners, consider: what they are expected to do now.
 
-Every End Class QA pass runs with at least:
+## Screen-space usage
 
-- **one mentor** (instructor console, desktop browser);
-- **one student** (learner view, mobile viewport — a real phone or the
-  existing Playwright phone profile).
+Inspect: unused horizontal space; unnecessarily narrow content; excessive
+vertical stacking; unnecessary scrolling; cramped panels; poor use of
+available desktop space.
 
-Both connected to the same room at the same time. The existing e2e harness
-(`e2e/`) already drives one instructor plus phone-viewport learners
-concurrently — extend it; state must arrive over realtime, and no test may
-reload a page to make an assertion pass (existing suite rule — keep it,
-except in the scenarios that explicitly test refresh/reopen).
+Do not assume that using more width automatically means better design.
 
-## QA checklist — all must pass
+## Action clarity
 
-1. Mentor ends class successfully (confirm → success response).
-2. Mentor lands on the Class Summary for that class automatically, and
-   available results are visible (loading state acceptable while it loads).
-3. The connected student changes to the Class Ended state — message naming
-   the instructor — without manual refresh.
-4. The student can no longer submit live activity responses (poll, pulse,
-   activity, question, upvote all disabled; a forced/in-flight submit is
-   refused with the ended message).
-5. Previously submitted responses remain preserved and visible to the
-   student (including activity submissions and any feedback) and countable
-   in the summary.
-6. Student refresh after class ended → ended state, same identity, preserved
-   submissions; never the join form for a student who had joined.
-7. Student reconnect after class ended (kill the connection, restore it) →
-   ended state arrives without user action.
-8. Student reopens an already-ended class URL → ended state; a never-joined
-   visitor attempting to join gets a clear "session has ended" refusal.
-9. End Class failure (simulate: network offline or server 500) does not
-   create a false ended state anywhere — mentor stays in the live class with
-   a clear failure message; students see no change.
-10. Mentor can retry after a failed End Class, and the retry works; retrying
-    an already-ended class does not strand the mentor.
-11. Pulse labels render as `✅ Got it` / `🤔 Shaky` / `🆘 Lost` on the
-    student buttons, the mentor's pulse panel (current and history), and the
-    summary.
-12. The selected pulse option is distinguishable without relying on color
-    (grayscale check), and `aria-pressed` still reports it.
-13. Existing mobile learner usability is not materially regressed: no
-    horizontal overflow, touch targets ≥44px, and the existing mobile e2e
-    checks still pass with the new labels and ended-state UI.
+Review whether primary, secondary, and destructive actions are clearly
+distinguishable and appropriately placed.
 
-## Automated tests
+## Density and readability
 
-Preserved from the previous assignment — these categories still apply and the
-existing suites must stay green:
+Inspect: card density; spacing; typography; grouping; line length; repeated
+visual containers; list/table readability.
 
-- **Unit/integration** (`npm test`): keep every existing test passing
-  (labels changed in UI must not break label-based assertions — update
-  assertions, never delete coverage). Extend integration coverage where the
-  new behavior is server-visible: end-while-in-flight submission refusal;
-  ending an already-ended room behaves as success/no-op; ended room settles
-  or presents open collectors (activity/timer/pulse round) as closed.
-- **Multi-client e2e** (`npm run test:e2e`): extend the existing end-class
-  scenario to cover the mentor's auto-navigation to the summary, the
-  student's instructor-named ended message, preserved submissions after end,
-  and student refresh/reopen of an ended class. Add the failure-path
-  scenario (blocked `/end` → no false ended state, retry works) using
-  Playwright request interception.
-- **Mobile viewport**: the ended state and the new pulse labels verified at
-  the existing phone profile (overflow and touch-target checks stay).
-- **Full check before handoff**: `npm run verify` (typecheck + unit +
-  integration) and `npm run test:e2e` pass; run `npm run test:workers` if the
-  environment allows, since Workers is the deployment target.
+## Classroom awareness
 
-No schema migration is expected for this assignment. If you find one is
-genuinely required, stop and justify it in the report before writing it —
-September 13 is close and `README.md` documents why mid-class cutovers are
-dangerous.
+For instructors, ask whether the interface makes it easy to understand:
+
+- What is happening right now?
+- What are learners doing?
+- Is anything waiting for my action?
+- Who appears to be struggling?
+- What should I do next?
+
+For learners, ask:
+
+- What am I expected to do?
+- Has my response been accepted?
+- Is the class still active?
+- What can I do now?
+
+## State clarity
+
+Evaluate how clearly the following states are communicated: loading; empty;
+live; submitted; closed; revealed; failed; reconnecting; ended.
+
+Important state should not depend on subtle styling alone.
+
+## Consistency
+
+Review reasonable consistency of: spacing; controls; cards; typography;
+status treatment; navigation; terminology.
+
+Do not turn this into a design-system project.
+
+## Accessibility-related usability
+
+Flag obvious issues such as: state communicated only through color; weak
+focus visibility; tiny interactive targets; poor hierarchy; visibly weak
+contrast; difficult readability.
+
+This is not a formal WCAG audit.
 
 ---
 
-# Acceptance criteria
+# Evidence requirement
 
-This assignment is PASS only when:
+The audit must inspect the actual rendered application. Source-code review
+alone is insufficient. Use realistic classroom/test states and gather
+screenshots or equivalent visual evidence where useful.
 
-- every item in the QA checklist above passes with the two-client setup;
-- all automated suites pass as described;
-- no mandatory M0 behavior regressed (create/join/poll/pulse/questions/
-  picker/public view/summary all still work end-to-end);
-- no new scope from the out-of-scope list crept in;
-- the diff is reviewable: small, focused on the two workstreams, matching
-  existing code conventions.
+Representative states should include, where possible:
+
+- idle live class;
+- active poll;
+- active activity;
+- Class Pulse (with responses recorded);
+- questions containing realistic content;
+- summary containing results;
+- ended class.
+
+Every meaningful finding must identify the actual surface/state where it was
+observed. Generic UX recommendations without evidence are not sufficient.
+
+---
+
+# Finding format
+
+Every meaningful finding must contain:
+
+**Finding** — what is wrong.
+
+**Evidence** — where and how it appears in the rendered product (surface,
+state, viewport).
+
+**User impact** — how it affects instructor or learner behavior.
+
+**Severity** — use exactly one of:
+
+- `P0 — blocks classroom use`
+- `P1 — materially harms classroom operation`
+- `P2 — noticeable usability issue`
+- `P3 — polish`
+
+**Recommended timing** — use exactly one of:
+
+- `Before Sep 13`
+- `After first classroom`
+
+**Smallest reasonable fix** — the minimum intervention that addresses the
+issue. Do not default to redesign.
+
+---
+
+# Deadline prioritization
+
+The September 13 first-classroom deadline controls prioritization. Recommend
+implementation before the first classroom only when a problem materially
+affects:
+
+- instructor ability to operate the class;
+- learner ability to understand or respond;
+- important state visibility;
+- reliability perception;
+- severe readability/usability.
+
+Cosmetic modernization, aesthetic improvements, and non-essential layout
+optimization should normally wait until after first classroom use.
+
+---
+
+# Alternative layouts
+
+Up to two alternative desktop layout directions may be proposed, but **only
+if actual evidence shows a meaningful structural layout problem**. Possible
+hypotheses to test against evidence (not conclusions to assume):
+
+- **Instructor** — the current classroom activity receives the dominant
+  working area while supporting controls and participant information
+  occupy a secondary region.
+- **Learner** — the currently expected action receives dominant focus.
+- **Summary** — the most decision-useful results appear before supporting
+  detail.
+
+These are hypotheses only. Do not force a sidebar, two-column layout, or
+structural redesign unless evidence justifies it. Do not implement any
+alternative during the audit.
+
+---
+
+# Required final output of the audit
+
+1. Executive assessment of current desktop usability.
+2. Evidence-backed findings, in the format above.
+3. P0/P1/P2/P3 prioritization of every finding.
+4. Explicit `Before Sep 13` vs `After first classroom` classification of
+   every finding.
+5. Smallest reasonable fix for every finding.
+6. One final verdict, exactly one of:
+   - `NO DESKTOP CHANGE REQUIRED BEFORE FIRST CLASS`
+   - `TARGETED DESKTOP FIXES REQUIRED`
+   - `STRUCTURAL DESKTOP REDESIGN JUSTIFIED`
+7. If targeted fixes are recommended: a proposed bounded implementation
+   scope.
+8. If structural redesign is justified: evidence showing why targeted
+   CSS/layout changes would be insufficient.
+
+---
+
+# Explicitly out of scope for the audit
+
+The audit must not:
+
+- implement UI changes;
+- modify product behavior;
+- change End Class behavior;
+- change Class Pulse behavior;
+- add AI functionality;
+- add new learner features;
+- redesign anything mobile;
+- rebuild the design system;
+- perform broad refactoring;
+- rewrite `PRD.md`;
+- do speculative future-product work.
+
+The audit is analysis and recommendations only. Implementation of any
+finding is a separate, later assignment.
+
+---
 
 # Stop condition
 
-When the acceptance criteria are met: STOP. Do not continue into desktop
-redesign, AI work, or any future milestone. Then report:
-
-1. implementation summary per workstream;
-2. files/components changed;
-3. tests added or updated, and the results of each suite;
-4. any behavior decision made where this document allowed a choice (e.g. how
-   open collectors are settled at end time);
-5. known limitations or risks remaining for September 13;
-6. recommendation: `READY FOR CLASS`, `READY WITH CAVEATS`, or `NOT READY`.
+The audit is complete when the required final output above has been
+produced. It does not implement anything. A subsequent assignment, scoped
+from the audit's findings, will cover implementation of any `Before Sep 13`
+targeted fixes — bounded the same way this document bounds this one.
