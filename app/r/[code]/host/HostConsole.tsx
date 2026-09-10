@@ -28,7 +28,12 @@ import { TimerChip } from "@/components/TimerChip";
  * Everything an instructor needs mid-lesson is on one screen: no tabs, no
  * modals, no navigation. The left column is what they act on (ask a question,
  * work the queue); the right column is the class itself — the screen they are
- * sharing, how learners get in, who is here and how the room feels.
+ * sharing, the clock, how the room feels, how learners get in and who is here.
+ *
+ * Both columns read live-first: what the class is doing right now comes before
+ * what it took to set that up. So the timer and the pulse sit above the join
+ * code and the instructor link, which are read once at the start of a class and
+ * are the largest thing in the column.
  */
 export function HostConsole({
   code,
@@ -212,13 +217,6 @@ export function HostConsole({
             disabled={ended}
             act={act}
           />
-          <InvitePanel
-            code={code}
-            title={snapshot.room.title}
-            joinUrl={joinUrl}
-            qr={qr}
-            hostToken={hostToken}
-          />
           <TimerPanel
             code={code}
             timer={snapshot.timer}
@@ -232,6 +230,13 @@ export function HostConsole({
             disabled={ended}
             act={act}
             code={code}
+          />
+          <InvitePanel
+            code={code}
+            title={snapshot.room.title}
+            joinUrl={joinUrl}
+            qr={qr}
+            hostToken={hostToken}
           />
           <PickerPanel picks={snapshot.picks} disabled={ended} act={act} code={code} />
           <MaterialsPanel
