@@ -1,722 +1,301 @@
-> **Superseded in part — classroom workflow expansion (September 2026).**
->
-> This document describes the M0 implementation assignment, which is complete.
-> A later assignment expanded the scope to the taught-session workflow: sections,
-> pulse rounds, open-ended activities with review and feedback, timers,
-> materials, contextual questions, session plans, and the extended summary and
-> export. Read `README.md` for what the product does now; the engineering
-> priorities and constraints below still apply.
+# Current Assignment — M0: Host Console Live-State Hierarchy Fix
 
-# Current Assignment — M0: First Classroom
+**Status:** READY FOR IMPLEMENTATION
+**Executor:** Claude Code
+**Type:** Bounded pre-classroom implementation assignment
+**Milestone:** M0 — First Classroom
+**First real classroom target:** September 13, 2026
+**Feature freeze target:** September 12, 2026
 
-**Status:** READY FOR IMPLEMENTATION  
-**Milestone:** M0 — First Classroom  
-**Target live usage:** September 13, 2026  
-**Feature freeze:** September 12, 2026
+This assignment replaces **M0: Desktop UI/UX Audit**, committed as `0f3d691`.
+The production behavioral baseline remains `474ad39`. Preserve the behavior at
+that baseline except for the three explicitly authorized hierarchy changes in
+this document.
 
 ---
 
-# Role
+# Audit decision carried forward
 
-You are the primary software engineer responsible for implementing Classroom Copilot M0.
+The primary desktop audit was performed by ChatGPT Work. A supplemental Codex
+audit completed the missing states and rendered the production application with
+Playwright at exactly:
 
-The Product Owner will use this product in a real live class on September 13, 2026.
+- `1280×720`;
+- `1366×768`;
+- `1440×900`;
+- `1920×1080`.
 
-Prioritize:
+The completed audit gate concluded:
 
-1. reliability;
-2. classroom usability;
-3. speed of delivery;
-4. clean enough engineering to continue development later.
+`TARGETED DESKTOP FIXES REQUIRED`
 
-Do not optimize for theoretical future scale.
+The audits confirmed one material pre-classroom finding:
 
-Do not redesign the product.
+> **F1 — Preparation and setup displace live classroom work.**
 
----
+At the two smaller laptop viewports, the active poll's operational controls
+fell below or across the fold. At all four viewports, running activity/review
+state and Timer/Class Pulse were displaced by preparation, invitation, and
+access content. The wider viewports reduced the poll consequence but did not
+resolve the remaining hierarchy problem.
 
-# Sources of Truth
+No additional P0/P1 issue was found during supplemental verification.
+Structural redesign is **not** justified.
 
-Read before implementation:
+The empty Participant Picker feedback issue remains:
 
-1. `PRD.md`
-2. this `Current Assignment.md`
+- severity: `P2 — noticeable usability issue`;
+- timing: `After first classroom`;
+- status for this assignment: **explicitly out of scope**.
 
-Use:
-
-- `PRD.md` for product intent, scope, principles, and milestone boundaries;
-- `Current Assignment.md` for active engineering work.
-
-If they appear inconsistent, do not silently expand scope.
-
-Prefer the narrower interpretation that protects the September 13 classroom delivery.
-
----
-
-# Objective
-
-Implement a deployable browser-based live classroom interaction application.
-
-The Product Owner must be able to:
-
-1. create a room;
-2. share a room code or URL;
-3. allow learners to join from phones;
-4. run realtime polls;
-5. observe Class Pulse;
-6. receive anonymous questions;
-7. select participants;
-8. screen-share a clean classroom view;
-9. review a basic session summary.
-
-The entire classroom flow must work without AI.
+Do not restart or broaden the audit.
 
 ---
 
-# Required User Flows
+# Goal
 
-## Flow A — Instructor starts class
+When an instructor is actively running a class, content representing what is
+happening **right now** must appear before content used primarily to prepare a
+future action or invite/access the room.
 
-Instructor:
+This is a hierarchy correction, not a visual redesign.
 
-1. opens application;
-2. creates a new room;
-3. receives room code and join URL;
-4. opens Instructor Console;
-5. optionally opens Public View in another tab/window.
+Preserve:
 
----
+- existing functionality;
+- the existing two-column desktop structure;
+- the existing visual language;
+- existing learner behavior;
+- existing mobile usability;
+- existing realtime behavior;
+- existing navigation;
+- existing data and state semantics.
 
-## Flow B — Learner joins
-
-Learner:
-
-1. opens join URL or enters room code;
-2. enters display name;
-3. joins room;
-4. appears in instructor roster;
-5. can participate without account creation.
-
-Learner UI must be usable on a typical smartphone.
+Do not create a new dashboard, navigation model, or classroom interaction
+model.
 
 ---
 
-## Flow C — Live poll
+# Sources of truth
 
-Instructor:
+Before implementation, read:
 
-1. creates/selects a poll;
-2. enters question;
-3. selects type;
-4. opens poll.
+1. `PRD.md` for product intent and milestone constraints;
+2. `README.md` for current product behavior and terminology;
+3. this document for the only authorized implementation scope;
+4. the implementation at behavioral baseline `474ad39`.
 
-Supported M0 types:
-
-- Yes / No;
-- A/B/C/D multiple choice;
-- confidence scale 1–5.
-
-Learners:
-
-1. see active question;
-2. submit answer;
-3. see confirmation.
-
-Instructor:
-
-1. sees response count update;
-2. can close poll;
-3. can reveal aggregate results.
-
-Aggregate results may be shown on Public View.
-
-Do not publicly reveal individual learner answers.
+If another document or an implementation idea suggests broader work, this
+assignment controls. Prefer the narrowest change that satisfies the acceptance
+criteria and protects the September 13 classroom.
 
 ---
 
-## Flow D — Class Pulse
+# Authorized implementation scope
 
-Learner can choose:
+This assignment contains **exactly three hierarchy changes**.
 
-- Got it;
-- Shaky;
-- Lost.
+## 1. Poll hierarchy
 
-Instructor sees aggregate current class state.
+When a poll is active or otherwise has current operational state that the
+instructor needs to manage, place the **current poll** and its relevant
+operational information/actions before the **new-poll composer** in desktop
+host-console reading order.
 
-A learner should be able to update their pulse during the session.
+Existing current-poll content to prioritize includes, where applicable:
 
-The implementation must prevent a single learner session from artificially counting as multiple simultaneous pulse responses.
+- poll prompt;
+- response count and results state;
+- `Close poll`;
+- reveal/show-results action;
+- other existing current-poll operational controls.
 
----
+The instructor must not have to pass a large new-poll preparation form before
+reaching the poll already being operated.
 
-## Flow E — Anonymous questions
+Do not redesign poll functionality or add poll features.
 
-Learner can:
+## 2. Activity hierarchy
 
-- enter question text;
-- submit anonymously;
-- view active questions if appropriate;
-- upvote a question.
+When an activity is running or has responses requiring instructor review,
+place the **running/current activity state** before the **activity composer** in
+desktop host-console reading order.
 
-Instructor can:
+Prioritize existing information and actions such as:
 
-- see submitted questions;
-- see upvote counts;
-- mark question answered.
+- current activity;
+- running or closed state;
+- response count;
+- review entry;
+- follow-up indicators;
+- existing activity controls.
 
-Do not implement threaded discussion.
+The audit specifically reproduced the case where an activity was created with
+additional options and the expanded, now-empty composer remained above the
+running activity. Preparation UI must not unnecessarily displace the live
+activity or its review entry.
 
----
+Use the smallest solution consistent with the current component architecture.
+Do not create a new activity workflow or redesign response review.
 
-## Flow F — Participant Picker
+## 3. Supporting-column live-state hierarchy
 
-Instructor can select a joined learner.
+In the desktop supporting column, place live classroom controls and signals
+ahead of the large invitation/instructor-access content.
 
-Required behavior:
+Specifically:
 
-- randomly select from active/joined roster;
-- visibly display selected learner;
-- retain session selection history;
-- avoid immediate repeated selection where practical.
+1. `Timer` must appear before the invitation/instructor-access panel.
+2. `Class Pulse` must appear before the invitation/instructor-access panel.
 
-Do not implement AI-based participant selection.
+Invitation and access information must remain available and usable. Do not
+remove or weaken:
 
----
+- the join code;
+- learner invitation functionality;
+- presentation access;
+- instructor access information required by the existing product.
 
-## Flow G — Public View
-
-Instructor can open a separate screen suitable for screen sharing.
-
-It should support states such as:
-
-- room join screen;
-- active question;
-- aggregate poll result;
-- participant selected;
-- neutral/waiting state.
-
-Public View must never expose:
-
-- instructor-only controls;
-- learner private data;
-- hidden individual responses;
-- sensitive session internals.
+This change is ordering and priority only, not feature removal.
 
 ---
 
-## Flow H — Session Summary
+# Implementation constraints
 
-Instructor can view a basic session summary.
-
-Include where practical:
-
-- session date/time;
-- total learners joined;
-- poll history;
-- aggregate poll results;
-- questions submitted;
-- class pulse data;
-- participant-picker history;
-- basic participation counts.
-
-No sophisticated visualization is required.
-
-Clarity is more important than visual complexity.
+- Keep the existing two-column desktop host-console structure.
+- Reuse the current components, actions, state, and styling wherever possible.
+- Do not introduce a new dashboard, sidebar, tab system, or modal workflow.
+- Do not change poll, activity, Timer, Pulse, invitation, access, End Class, or
+  Summary semantics.
+- Do not change APIs, persistence, migrations, authorization, or room-state
+  contracts unless an unavoidable implementation blocker is demonstrated.
+- Do not make unrelated visual-polish or refactoring changes.
+- Do not include the Participant Picker P2 issue.
+- Do not alter learner-facing functionality as part of this assignment.
 
 ---
 
-# Realtime Requirements
+# Responsive behavior
 
-At minimum, realtime updates must apply to:
+Validate the implementation at exactly:
 
-- learner joins;
-- poll responses;
-- poll state;
-- class pulse;
-- submitted questions;
-- question upvotes;
-- question answered state;
-- participant selection where relevant;
-- public-view state.
+- `1280×720`;
+- `1366×768`;
+- `1440×900`;
+- `1920×1080`.
 
-The instructor must not need to manually refresh during normal classroom use.
+The two smaller laptop sizes are especially important because the audit found
+the strongest operational consequence there. Do not infer one viewport's
+result from another; render and inspect all four.
 
----
+## Mobile protection
 
-# State and Persistence
+Do not knowingly regress learner mobile behavior.
 
-Persist enough state that common browser refreshes do not destroy a live classroom.
-
-At minimum, consider persistence for:
-
-- room;
-- instructor session identity;
-- learner identity/session;
-- roster;
-- active poll;
-- poll responses;
-- pulse;
-- questions;
-- upvotes;
-- picker history;
-- session events.
-
-Do not create a complex identity system.
-
-Anonymous/session-based learner identity is sufficient for M0.
+Also inspect whether changing host-console component or DOM order affects a
+narrow/mobile host layout. Prefer the smallest responsive implementation that
+improves desktop hierarchy without creating an inferior narrow layout. Do not
+introduce a broad responsive redesign.
 
 ---
 
-# UX Requirements
+# Acceptance criteria
 
-## Instructor
+The implementation is complete only when all of the following are satisfied:
 
-Instructor Console should make common controls obvious.
-
-Do not bury classroom actions behind deep navigation.
-
-Primary classroom controls should be reachable quickly.
-
----
-
-## Learner
-
-Design mobile-first.
-
-A learner should not need to understand the product.
-
-The expected mental model is:
-
-1. join;
-2. see current classroom action;
-3. respond.
-
----
-
-## Public display
-
-Use large readable typography and minimal visual clutter.
-
-Assume it may be viewed through screen share or projector.
+1. At `1280×720`, current poll state and its operational controls receive
+   higher reading priority than the new-poll composer.
+2. At `1366×768`, the same hierarchy holds.
+3. At `1440×900`, the same hierarchy remains coherent.
+4. At `1920×1080`, the same hierarchy remains coherent.
+5. A running activity and its response/review entry appear before the activity
+   composer.
+6. An expanded or empty activity composer does not unnecessarily push the
+   running activity below preparation UI.
+7. Timer appears before the invitation/instructor-access panel in the desktop
+   supporting column.
+8. Class Pulse appears before the invitation/instructor-access panel.
+9. Invitation and access functionality remain available.
+10. Existing poll behavior is unchanged.
+11. Existing activity behavior is unchanged.
+12. Existing Timer behavior is unchanged.
+13. Existing Pulse behavior is unchanged.
+14. Existing End Class behavior is unchanged.
+15. Existing realtime behavior is unchanged.
+16. Existing Summary and navigation behavior is unchanged.
+17. The existing learner experience is not materially changed.
+18. Existing automated test suites remain green.
 
 ---
 
-# Suggested Technical Approach
+# Verification requirements
 
-Choose the simplest reliable architecture.
+Source review and automated assertions alone are insufficient. Inspect the
+rendered result with the repository's existing browser automation/Playwright
+capability where practical.
 
-Preferred direction:
+At each of the four required desktop viewports, verify a populated live class
+containing at minimum:
 
-- Next.js;
-- TypeScript;
-- React;
-- Supabase for database and realtime;
-- simple production deployment such as Vercel.
+- a current/open poll and its operational controls;
+- a running activity with at least one response/review state;
+- an active or populated Class Pulse;
+- a Timer;
+- invitation and instructor-access content.
 
-Alternatives are acceptable if they materially improve delivery reliability.
+Record reliable rendered evidence for each viewport. Confirm the intended
+reading order and whether the important current-state controls can be reached
+without passing the preparation/setup content they govern.
 
-Do not introduce:
+Also verify:
 
-- microservices;
-- Kubernetes;
-- Kafka;
-- Redis unless genuinely necessary;
-- custom realtime protocol;
-- separate mobile app;
-- complicated infrastructure.
+- a narrow/mobile host layout after any DOM-order change;
+- representative learner mobile behavior;
+- End Class behavior;
+- Summary and navigation;
+- realtime propagation for the affected live states;
+- all existing automated test suites relevant to the changed components.
 
-The application should be straightforward for another engineer to run locally.
-
----
-
-# Data Model Guidance
-
-Exact schema is an engineering decision.
-
-Likely concepts include:
-
-- room/session;
-- participant;
-- poll;
-- poll option;
-- poll response;
-- class pulse state;
-- question;
-- question upvote;
-- picker event;
-- session event.
-
-Keep schema understandable and normalized enough to avoid obvious integrity problems.
-
-Do not over-model future milestones.
+If validation reveals an unrelated issue, report it separately. Do not expand
+this implementation to fix it.
 
 ---
 
-# AI
+# Explicitly out of scope
 
-AI is NOT required for M0 pass.
+Do not:
 
-Do not begin with AI.
-
-Only consider the optional `AI Class Read` after all mandatory classroom functionality is stable.
-
-If implemented:
-
-Input:
-
-- aggregate poll result;
-- aggregate pulse;
-- current anonymous questions.
-
-Output:
-
-- maximum a few short sentences;
-- advisory only;
-- no autonomous action.
-
-Example:
-
-> Understanding appears mixed. Consider another worked example before continuing.
-
-Requirements:
-
-- AI provider key server-side only;
-- graceful failure;
-- the rest of the application must function when AI is unavailable.
-
-If AI jeopardizes delivery, remove it.
+- perform another broad UI/UX audit;
+- structurally redesign the instructor console;
+- create a new dashboard or interaction model;
+- change product functionality;
+- add new poll, activity, Timer, Pulse, invitation, or access features;
+- implement the Participant Picker P2 finding;
+- change learner-facing workflows;
+- change the Public/Projector experience except where existing behavior must be
+  preserved and verified;
+- change End Class or Summary behavior;
+- change APIs, database schema, migrations, deployment configuration, or
+  production infrastructure;
+- bundle unrelated cleanup, refactoring, styling, or cosmetic modernization;
+- deploy as part of this assignment.
 
 ---
 
-# Testing Requirements
-
-Do not rely solely on unit tests.
-
-Before declaring M0 ready, validate actual multi-user behavior.
-
-Required testing categories:
-
-## Automated
-
-Cover important logic and critical paths where practical.
-
-Examples:
-
-- room creation;
-- room joining;
-- poll lifecycle;
-- duplicate response handling;
-- pulse update semantics;
-- picker logic;
-- permission boundaries.
-
----
-
-## Multi-client simulation
-
-Use multiple browser sessions.
-
-Validate:
-
-- one instructor;
-- multiple learners;
-- concurrent poll responses;
-- realtime updates;
-- question upvotes;
-- refresh/reconnect.
-
----
-
-## Mobile
-
-At minimum validate a representative mobile viewport.
-
-Important screens:
-
-- join;
-- learner home;
-- poll response;
-- pulse;
-- question submission.
-
----
-
-## Failure scenarios
-
-Test:
-
-- invalid room code;
-- closed/nonexistent room;
-- duplicate join;
-- instructor refresh;
-- learner refresh;
-- network interruption where reasonably testable;
-- poll closes during response;
-- empty participant picker;
-- participant disconnects.
-
----
-
-# Deployment Requirement
-
-M0 is not complete if it only runs locally.
-
-Provide a production-accessible deployment suitable for the September 13 class.
-
-Document:
-
-- production URL;
-- environment variables;
-- deployment procedure;
-- local development instructions;
-- database setup/migrations.
-
-No secrets may be committed.
-
----
-
-# README Requirement
-
-Create/update `README.md` with:
-
-- concise product description;
-- stack;
-- local setup;
-- environment configuration;
-- database setup;
-- development commands;
-- test commands;
-- production/deployment notes;
-- current M0 scope.
-
-Do not turn README into a product strategy document.
-
-That belongs in `PRD.md`.
-
----
-
-# Explicit Non-Goals
-
-Do NOT implement:
-
-- subscriptions;
-- payment integration;
-- complex authentication;
-- institution accounts;
-- LMS;
-- Google Classroom;
-- Moodle;
-- native apps;
-- physical classroom cards;
-- QR card scanning;
-- computer vision;
-- facial recognition;
-- attention detection;
-- emotion detection;
-- student AI tutor;
-- AI teaching agent;
-- advanced analytics;
-- curriculum engine;
-- content marketplace;
-- leaderboard;
-- badge system;
-- chat;
-- video calls;
-- breakout-room system;
-- PowerPoint add-in;
-- Google Slides add-in;
-- browser extension.
-
-Do not pre-implement future milestone features.
-
----
-
-# Quality Bar
-
-This is a rapid product milestone, not a throwaway prototype.
-
-Acceptable:
-
-- simple architecture;
-- limited visual polish;
-- small amount of pragmatic technical debt;
-- managed services;
-- narrow scope.
-
-Not acceptable:
-
-- fragile classroom state;
-- obvious security mistakes;
-- broken mobile experience;
-- fake realtime behavior;
-- critical state existing only in one browser's memory;
-- undocumented setup;
-- features that only work in a happy-path demo.
-
----
-
-# Delivery Sequence
-
-## September 8
-
-Establish:
-
-- repository/application skeleton;
-- chosen stack;
-- database;
-- room creation;
-- room join;
-- basic realtime connectivity.
-
-Target state:
-
-> Instructor and learner browsers can join the same room and observe shared realtime state.
-
----
-
-## September 9
-
-Implement:
-
-- roster;
-- polls;
-- Class Pulse;
-- Participant Picker.
-
-Target state:
-
-> Core classroom interaction works.
-
----
-
-## September 10
-
-Implement:
-
-- anonymous Q&A;
-- upvotes;
-- Public View;
-- classroom UX cleanup.
-
-Target state:
-
-> Complete live-class flow exists.
-
----
-
-## September 11
-
-Implement:
-
-- session summary;
-- missing persistence/reconnect behavior;
-- production hardening;
-- optional AI Class Read only if safe.
-
-Target state:
-
-> Feature-complete candidate.
-
----
-
-## September 12
-
-FEATURE FREEZE.
-
-Only:
-
-- bug fixes;
-- usability fixes;
-- responsive fixes;
-- multi-client testing;
-- reconnect testing;
-- deployment verification;
-- classroom rehearsal.
-
-Do not add speculative features.
-
----
-
-## September 13
-
-Real classroom usage.
-
-The live class is the primary M0 product test.
-
----
-
-# Acceptance Criteria
-
-M0 is PASS only when all mandatory criteria are satisfied.
-
-## Product
-
-- instructor can create room;
-- learner can join;
-- learner experience works on phone;
-- roster updates;
-- realtime poll works;
-- Yes/No works;
-- A/B/C/D works;
-- confidence scale works;
-- poll close/reveal works;
-- Class Pulse works;
-- anonymous question submission works;
-- question upvote works;
-- instructor can mark answered;
-- participant picker works;
-- Public View works;
-- session summary works.
-
-## Reliability
-
-- instructor refresh does not destroy session;
-- normal learner refresh can recover sufficiently;
-- multiple learners can interact concurrently;
-- app behaves gracefully on invalid input;
-- production deployment is available.
-
-## Privacy
-
-- learner cannot access instructor controls;
-- public view does not expose private data;
-- individual answers are not publicly revealed accidentally;
-- application secrets are not client-exposed.
-
-## Documentation
-
-- README is usable;
-- setup is reproducible;
-- deployment is documented.
-
-## Final milestone gate
-
-> Product Owner successfully uses Classroom Copilot end-to-end in a real live class on September 13, 2026.
-
----
-
-# Stop Condition
-
-Once all mandatory acceptance criteria are met and the production build is stable:
-
-STOP.
-
-Do not continue into:
-
-- AI pedagogy;
-- school mode;
-- monetization;
-- advanced analytics;
-- future milestones.
-
-Report:
-
-1. implementation summary;
-2. architecture/stack selected;
-3. files/components added;
-4. tests performed;
-5. known limitations;
-6. production deployment state;
-7. remaining risks for September 13;
-8. recommendation: `READY FOR CLASS`, `READY WITH CAVEATS`, or `NOT READY`.
+# Required implementation report
+
+When implementation is complete, report:
+
+1. files changed;
+2. how each of the three authorized hierarchy changes was implemented;
+3. rendered verification result at each required viewport;
+4. narrow/mobile host-layout result;
+5. learner mobile protection result;
+6. automated tests run and their results;
+7. confirmation that invitation/access, End Class, realtime, Summary, and
+   navigation behavior remain intact;
+8. any blocker or acceptance criterion not satisfied;
+9. confirmation that no out-of-scope work was included.
+
+Stop after this bounded assignment. Do not begin broader redesign or backlog
+work.

@@ -343,11 +343,107 @@ test.describe("a live class, across five browsers", () => {
     const instructor = await openInstructor(browser, "Ending class");
     const learner = await openLearner(browser, instructor.code, "Ada");
 
-    instructor.page.once("dialog", (dialog) => dialog.accept());
-    await instructor.page.getByRole("button", { name: /end class/i }).click();
+    // The pulse first, so the end has something to preserve. The labels carry
+    // their emoji, and the selection is marked by a tick as well as colour.
+    const gotIt = learner.page.getByRole("button", { name: "✅ Got it" });
+    await gotIt.click();
+    await expect(gotIt).toHaveAttribute("data-active", "true");
+    await expect(gotIt).toHaveAttribute("aria-pressed", "true");
+    await expect(gotIt.locator(".pulse-tick")).toBeVisible();
+    await expect(instructor.page.getByText("✅ Got it").first()).toBeVisible();
 
-    await expect(learner.page.getByText(/this class has ended/i)).toBeVisible();
-    await expect(learner.page.getByRole("button", { name: "Got it" })).toBeDisabled();
+    // An answered poll and a submitted activity, still open when the class
+    // ends — the work the end must settle without losing.
+    await instructor.page.getByPlaceholder(/does this make sense/i).fill("Ready to move on?");
+    await instructor.page.getByRole("button", { name: "Yes / No" }).click();
+    await instructor.page.getByRole("button", { name: "Open poll", exact: true }).click();
+    await learner.page.getByRole("button", { name: "Yes", exact: true }).click();
+    await expect(learner.page.getByText(/answer sent/i)).toBeVisible();
+
+    await instructor.page
+      .getByPlaceholder(/where does the quantity ordered belong/i)
+      .fill("One thing you learned today");
+    await instructor.page.getByRole("button", { name: "Ask now" }).click();
+    await learner.page.getByLabel("Your answer").fill("JOINs match rows across tables");
+    await learner.page.getByRole("button", { name: "Send my answer" }).click();
+    await expect(learner.page.getByText(/Sent ·/)).toBeVisible();
+
+    instructor.page.once("dialog", (dialog) => dialog.accept());
+    await instructor.page.getByRole("button", { name: "End class" }).click();
+
+    // The instructor lands on the summary — on the server's confirmed success,
+    // with no second click — and the session's results are there.
+    await instructor.page.waitForURL(new RegExp(`/r/${instructor.code}/summary`));
+    await expect(instructor.page.getByRole("heading", { name: "Ending class" })).toBeVisible();
+    await expect(instructor.page.getByText("Class pulse at the end")).toBeVisible();
+    await expect(instructor.page.getByText("✅ Got it").first()).toBeVisible();
+    await expect(instructor.page.getByRole("link", { name: "Home" })).toBeVisible();
+
+    // The learner flips to ended without touching anything, told by whom.
+    await expect(learner.page.getByText(/your instructor has ended this class/i)).toBeVisible();
+    await expect(gotIt).toBeDisabled();
+    // Everything they sent is still theirs to see: the pulse still marked,
+    // the poll answer still counted, the activity submission still shown.
+    await expect(gotIt).toHaveAttribute("data-active", "true");
+    await expect(
+      learner.page.getByText(/this poll is closed. your answer was counted/i),
+    ).toBeVisible();
+    await expect(learner.page.getByText("JOINs match rows across tables")).toBeVisible();
+    await expect(learner.page.getByRole("link", { name: "Back to start" })).toBeVisible();
+
+    // A refresh lands back in the ended class — never on the join form — with
+    // all of it still there.
+    await learner.page.reload();
+    await expect(learner.page.getByText(/your instructor has ended this class/i)).toBeVisible();
+    await expect(learner.page.getByLabel(/your name/i)).toHaveCount(0);
+    await expect(learner.page.getByRole("button", { name: "✅ Got it" })).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+    await expect(learner.page.getByText("JOINs match rows across tables")).toBeVisible();
+
+    // The walk out of the venue: a captive portal starts answering 403 to
+    // everything. Joining an ended room is refused, so being sent to the join
+    // form here would be a dead end — the ended record must simply stay up.
+    await learner.page.route("**/api/rooms/**", (route) =>
+      route.fulfill({ status: 403, contentType: "application/json", body: '{"error":{"code":"forbidden","message":"blocked"}}' }),
+    );
+    await learner.page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await learner.page.waitForTimeout(1500);
+    await expect(learner.page.getByText(/your instructor has ended this class/i)).toBeVisible();
+    await expect(learner.page.getByLabel(/your name/i)).toHaveCount(0);
+    await expect(learner.page.getByText("JOINs match rows across tables")).toBeVisible();
+    await learner.page.unroute("**/api/rooms/**");
+
+    await learner.context.close();
+    await instructor.context.close();
+  });
+
+  test("a failed End Class leaves the class live, says so, and can be retried", async ({
+    browser,
+  }) => {
+    const instructor = await openInstructor(browser, "Ending fails first");
+    const learner = await openLearner(browser, instructor.code, "Ada");
+
+    // The venue network eats the request. The room must not pretend to end:
+    // no navigation, no ended banner anywhere, and the class stays usable.
+    await instructor.page.route("**/api/rooms/*/end", (route) => route.abort());
+    instructor.page.once("dialog", (dialog) => dialog.accept());
+    await instructor.page.getByRole("button", { name: "End class" }).click();
+
+    await expect(
+      instructor.page.getByText(/could not end the class — you are still live/i),
+    ).toBeVisible();
+    expect(instructor.page.url()).toContain("/host");
+    await expect(learner.page.getByText(/has ended this class/i)).toHaveCount(0);
+    await expect(learner.page.getByRole("button", { name: "✅ Got it" })).toBeEnabled();
+
+    // The retry, once the network is back, ends the class for real.
+    await instructor.page.unroute("**/api/rooms/*/end");
+    instructor.page.once("dialog", (dialog) => dialog.accept());
+    await instructor.page.getByRole("button", { name: "End class" }).click();
+    await instructor.page.waitForURL(/\/summary/);
+    await expect(learner.page.getByText(/your instructor has ended this class/i)).toBeVisible();
 
     await learner.context.close();
     await instructor.context.close();
@@ -456,10 +552,17 @@ test.describe("the presentation screen panel", () => {
 
     // --- ended --------------------------------------------------------------
     instructor.page.once("dialog", (dialog) => dialog.accept());
-    await instructor.page.getByRole("button", { name: /end class/i }).click();
+    await instructor.page.getByRole("button", { name: "End class" }).click();
     await expect(screen.page.getByText(/that is all for today/i)).toBeVisible();
-    // The mode is still Poll results; the class is looking at a closing message.
-    await expect(showing).toHaveText("Class ended");
+
+    // The instructor was taken to the summary; a console *reopened* on the
+    // ended class — the second-tab case — must still report honestly what the
+    // shared screen is showing: the mode is still Poll results, the class is
+    // looking at a closing message.
+    await instructor.page.waitForURL(/\/summary/);
+    await instructor.page.getByRole("link", { name: "Back to console" }).click();
+    await expect(instructor.page.getByText(/this class has ended/i)).toBeVisible();
+    await expect(currentlyShowing(instructor.page)).toHaveText("Class ended");
 
     await screen.context.close();
     await instructor.context.close();

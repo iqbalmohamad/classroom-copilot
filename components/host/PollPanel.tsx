@@ -10,8 +10,14 @@ import type { HostAction } from "./types";
  *
  * The composer stays visible the whole time: launching the next question is the
  * single most common action in a lesson and must never be more than a type and
- * a click away. The live poll sits directly beneath it with its four controls
- * spelled out — no icon-only buttons to decode while talking.
+ * a click away. Its four controls are spelled out — no icon-only buttons to
+ * decode while talking.
+ *
+ * Once a poll has actually been run, though, operating it beats preparing the
+ * next one: a question that is open, or closed with a result still to show,
+ * goes *above* the composer so the instructor never scrolls past a form to
+ * close the poll the class is answering right now. A draft is preparation like
+ * the composer itself, so it stays underneath.
  */
 const KINDS: PollKind[] = ["yes_no", "multiple_choice", "confidence"];
 
@@ -51,149 +57,167 @@ export function PollPanel({
     setBusy(false);
   }
 
-  return (
-    <>
-      <section className="card stack">
-        <div className="card-title" style={{ marginBottom: 0 }}>
-          Ask the class
-        </div>
+  /**
+   * A poll the instructor is *operating* — one that is open, or closed with
+   * a result still to show, hide or reopen — outranks the composer. A draft
+   * has not been asked yet, so it is preparation like the composer itself and
+   * stays below it.
+   */
+  const operating = live !== null && live.status !== "draft";
 
-        <div className="field">
-          <label className="visually-hidden" htmlFor="poll-prompt">
-            Question
-          </label>
-          <input
-            id="poll-prompt"
-            className="input"
-            value={prompt}
-            maxLength={300}
-            disabled={disabled}
-            placeholder="Does this make sense so far?"
-            onChange={(event) => setPrompt(event.target.value)}
-          />
-        </div>
+  const composer = (
+    <section className="card stack" key="composer">
+      <div className="card-title" style={{ marginBottom: 0 }}>
+        Ask the class
+      </div>
 
-        <div className="btn-group" role="group" aria-label="Question type">
-          {KINDS.map((value) => (
-            <button
-              key={value}
-              className={`btn btn-sm ${kind === value ? "btn-primary" : ""}`}
-              aria-pressed={kind === value}
-              disabled={disabled}
-              onClick={() => setKind(value)}
-            >
-              {POLL_KIND_LABELS[value]}
-            </button>
-          ))}
-        </div>
+      <div className="field">
+        <label className="visually-hidden" htmlFor="poll-prompt">
+          Question
+        </label>
+        <input
+          id="poll-prompt"
+          className="input"
+          value={prompt}
+          maxLength={300}
+          disabled={disabled}
+          placeholder="Does this make sense so far?"
+          onChange={(event) => setPrompt(event.target.value)}
+        />
+      </div>
 
-        {kind === "multiple_choice" ? (
-          <div className="stack-sm">
-            {["A", "B", "C", "D"].map((letter, index) => (
-              <input
-                key={letter}
-                className="input"
-                value={labels[index] ?? ""}
-                maxLength={120}
-                disabled={disabled}
-                placeholder={`${letter} — optional label`}
-                aria-label={`Option ${letter}`}
-                onChange={(event) => {
-                  const next = [...labels];
-                  next[index] = event.target.value;
-                  setLabels(next);
-                }}
-              />
-            ))}
-            <p className="tiny muted">
-              Leave these blank to just show A, B, C and D — useful when the options are already
-              on your slide.
-            </p>
-          </div>
-        ) : null}
-
-        <div className="btn-group">
+      <div className="btn-group" role="group" aria-label="Question type">
+        {KINDS.map((value) => (
           <button
-            className="btn btn-primary"
-            disabled={disabled || busy || prompt.trim().length === 0}
-            onClick={() => launch(true)}
+            key={value}
+            className={`btn btn-sm ${kind === value ? "btn-primary" : ""}`}
+            aria-pressed={kind === value}
+            disabled={disabled}
+            onClick={() => setKind(value)}
           >
-            {busy ? "Opening…" : "Open poll"}
+            {POLL_KIND_LABELS[value]}
           </button>
+        ))}
+      </div>
+
+      {kind === "multiple_choice" ? (
+        <div className="stack-sm">
+          {["A", "B", "C", "D"].map((letter, index) => (
+            <input
+              key={letter}
+              className="input"
+              value={labels[index] ?? ""}
+              maxLength={120}
+              disabled={disabled}
+              placeholder={`${letter} — optional label`}
+              aria-label={`Option ${letter}`}
+              onChange={(event) => {
+                const next = [...labels];
+                next[index] = event.target.value;
+                setLabels(next);
+              }}
+            />
+          ))}
+          <p className="tiny muted">
+            Leave these blank to just show A, B, C and D — useful when the options are already
+            on your slide.
+          </p>
+        </div>
+      ) : null}
+
+      <div className="btn-group">
+        <button
+          className="btn btn-primary"
+          disabled={disabled || busy || prompt.trim().length === 0}
+          onClick={() => launch(true)}
+        >
+          {busy ? "Opening…" : "Open poll"}
+        </button>
+        <button
+          className="btn"
+          disabled={disabled || busy || prompt.trim().length === 0}
+          onClick={() => launch(false)}
+        >
+          Save for later
+        </button>
+      </div>
+    </section>
+  );
+
+  const currentPoll = live ? (
+    <section className="card stack" key="current">
+      <div className="row-between">
+        <div className="card-title" style={{ marginBottom: 0 }}>
+          {isOpen ? "Live poll" : "Last poll"}
+        </div>
+        <div className="row">
+          {isOpen ? (
+            <span className="chip chip-live">
+              <span className="dot" aria-hidden="true" />
+              Open
+            </span>
+          ) : (
+            <span className="chip">{live.status === "draft" ? "Not open" : "Closed"}</span>
+          )}
+          {live.revealed ? <span className="chip chip-accent">Shown on screen</span> : null}
+        </div>
+      </div>
+
+      <h2 style={{ fontSize: 19 }}>{live.prompt}</h2>
+
+      <p className="small muted">
+        {live.responseCount} {live.responseCount === 1 ? "answer" : "answers"} ·{" "}
+        {snapshot.presentCount} here now
+      </p>
+
+      {live.tallies ? <TallyBars tallies={live.tallies} /> : null}
+
+      <div className="btn-group">
+        {isOpen ? (
           <button
             className="btn"
-            disabled={disabled || busy || prompt.trim().length === 0}
-            onClick={() => launch(false)}
+            disabled={disabled}
+            onClick={() => act(`/api/rooms/${code}/polls/${live.id}`, { action: "close" })}
           >
-            Save for later
+            Close poll
           </button>
-        </div>
-      </section>
+        ) : (
+          <button
+            className="btn"
+            disabled={disabled}
+            onClick={() => act(`/api/rooms/${code}/polls/${live.id}`, { action: "open" })}
+          >
+            {live.status === "draft" ? "Open poll" : "Reopen poll"}
+          </button>
+        )}
+        <button
+          className={`btn ${live.revealed ? "" : "btn-primary"}`}
+          disabled={disabled || live.status === "draft"}
+          onClick={() =>
+            act(`/api/rooms/${code}/polls/${live.id}`, {
+              action: live.revealed ? "hide" : "reveal",
+            })
+          }
+        >
+          {live.revealed ? "Hide results" : "Show results on screen"}
+        </button>
+      </div>
+      <p className="tiny muted">
+        You always see the live distribution. Learners and the shared screen only see it once
+        you show it.
+      </p>
+    </section>
+  ) : null;
 
-      {live ? (
-        <section className="card stack">
-          <div className="row-between">
-            <div className="card-title" style={{ marginBottom: 0 }}>
-              {isOpen ? "Live poll" : "Last poll"}
-            </div>
-            <div className="row">
-              {isOpen ? (
-                <span className="chip chip-live">
-                  <span className="dot" aria-hidden="true" />
-                  Open
-                </span>
-              ) : (
-                <span className="chip">{live.status === "draft" ? "Not open" : "Closed"}</span>
-              )}
-              {live.revealed ? <span className="chip chip-accent">Shown on screen</span> : null}
-            </div>
-          </div>
-
-          <h2 style={{ fontSize: 19 }}>{live.prompt}</h2>
-
-          <p className="small muted">
-            {live.responseCount} {live.responseCount === 1 ? "answer" : "answers"} ·{" "}
-            {snapshot.presentCount} here now
-          </p>
-
-          {live.tallies ? <TallyBars tallies={live.tallies} /> : null}
-
-          <div className="btn-group">
-            {isOpen ? (
-              <button
-                className="btn"
-                disabled={disabled}
-                onClick={() => act(`/api/rooms/${code}/polls/${live.id}`, { action: "close" })}
-              >
-                Close poll
-              </button>
-            ) : (
-              <button
-                className="btn"
-                disabled={disabled}
-                onClick={() => act(`/api/rooms/${code}/polls/${live.id}`, { action: "open" })}
-              >
-                {live.status === "draft" ? "Open poll" : "Reopen poll"}
-              </button>
-            )}
-            <button
-              className={`btn ${live.revealed ? "" : "btn-primary"}`}
-              disabled={disabled || live.status === "draft"}
-              onClick={() =>
-                act(`/api/rooms/${code}/polls/${live.id}`, {
-                  action: live.revealed ? "hide" : "reveal",
-                })
-              }
-            >
-              {live.revealed ? "Hide results" : "Show results on screen"}
-            </button>
-          </div>
-          <p className="tiny muted">
-            You always see the live distribution. Learners and the shared screen only see it once
-            you show it.
-          </p>
-        </section>
-      ) : null}
+  return (
+    // Keyed, so crossing over is a move and not a rebuild. Positional slots
+    // looked equivalent and were not: opening a poll from the prepared card's
+    // own button destroyed the card that button lived in, and a keyboard
+    // instructor was dropped back to the top of the console mid-lesson. Keys
+    // keep the element — and the focus inside it — through the swap, exactly
+    // as when the card sat still and only its label changed.
+    <>
+      {operating ? [currentPoll, composer] : [composer, currentPoll]}
 
       {others.length > 0 ? (
         <section className="card">
