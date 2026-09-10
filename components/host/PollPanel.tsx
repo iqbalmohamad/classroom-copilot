@@ -66,7 +66,7 @@ export function PollPanel({
   const operating = live !== null && live.status !== "draft";
 
   const composer = (
-    <section className="card stack">
+    <section className="card stack" key="composer">
       <div className="card-title" style={{ marginBottom: 0 }}>
         Ask the class
       </div>
@@ -145,7 +145,7 @@ export function PollPanel({
   );
 
   const currentPoll = live ? (
-    <section className="card stack">
+    <section className="card stack" key="current">
       <div className="row-between">
         <div className="card-title" style={{ marginBottom: 0 }}>
           {isOpen ? "Live poll" : "Last poll"}
@@ -210,14 +210,14 @@ export function PollPanel({
   ) : null;
 
   return (
-    // The three slots are positional, so the composer is always the middle
-    // child and React never remounts it — a half-typed question survives the
-    // poll opening or closing underneath it. Only which slot around it holds
-    // the current poll changes.
+    // Keyed, so crossing over is a move and not a rebuild. Positional slots
+    // looked equivalent and were not: opening a poll from the prepared card's
+    // own button destroyed the card that button lived in, and a keyboard
+    // instructor was dropped back to the top of the console mid-lesson. Keys
+    // keep the element — and the focus inside it — through the swap, exactly
+    // as when the card sat still and only its label changed.
     <>
-      {operating ? currentPoll : null}
-      {composer}
-      {operating ? null : currentPoll}
+      {operating ? [currentPoll, composer] : [composer, currentPoll]}
 
       {others.length > 0 ? (
         <section className="card">

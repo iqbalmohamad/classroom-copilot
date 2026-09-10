@@ -167,4 +167,64 @@ test.describe("the host console reads live-state first", () => {
 
     await Promise.all([ada.context.close(), grace.context.close(), instructor.context.close()]);
   });
+
+  /**
+   * The other half of the conditional, and the cost of getting it wrong.
+   *
+   * Before anything has been run there is nothing to operate, so preparation
+   * keeps the top of each panel. Starting it is what flips the order — and the
+   * control that flips it is usually the one under the instructor's finger, or
+   * under their Tab key. If the swap rebuilds the card that button lives in,
+   * the button is destroyed mid-press and a keyboard instructor is returned to
+   * the top of the console. So: assert the order before, the order after, and
+   * that focus came through the swap on the button that caused it.
+   */
+  test("puts preparation first until there is something to run, and keeps focus across the flip", async ({
+    browser,
+  }) => {
+    test.setTimeout(120_000);
+    const instructor = await openInstructor(browser, "Prepared, then run");
+    const page = instructor.page;
+
+    const focused = () =>
+      page.evaluate(() => {
+        const el = document.activeElement as HTMLElement | null;
+        return `${el?.tagName ?? "?"}:${(el?.textContent ?? "").trim().slice(0, 20)}`;
+      });
+
+    // --- a poll saved for later is preparation, and stays below the composer
+    await page.getByPlaceholder(/does this make sense/i).fill("Prepared question");
+    await page.getByRole("button", { name: "Save for later" }).first().click();
+    const prepared = card(page, "Last poll");
+    await expect(prepared).toBeVisible();
+    const composer = page.locator("section.card").filter({ has: page.locator("#poll-prompt") });
+    expect(await readsBefore(page, composer, prepared), "a draft poll stays below the composer").toBe(true);
+
+    // Opening it from its own button flips the order without losing the button.
+    await prepared.getByRole("button", { name: "Open poll" }).focus();
+    expect(await focused()).toBe("BUTTON:Open poll");
+    await page.keyboard.press("Enter");
+    const live = card(page, "Live poll");
+    await expect(live).toBeVisible();
+    expect(await readsBefore(page, live, composer), "the opened poll reads before the composer").toBe(true);
+    expect(await focused(), "focus stayed on the button that opened the poll").toBe("BUTTON:Close poll");
+
+    // --- the same for a prepared exercise ---------------------------------
+    const activities = card(page, "Activities");
+    const activityComposer = page.locator("#activity-title");
+    await activities.getByPlaceholder("Where does the quantity ordered belong?").fill("Prepared exercise");
+    await activities.getByRole("button", { name: "Save for later" }).click();
+    const row = activities.locator(".activity-row").first();
+    await expect(row.locator("span.chip", { hasText: /^Draft$/ })).toBeVisible();
+    expect(await readsBefore(page, activityComposer, row), "a draft activity stays below the composer").toBe(true);
+
+    await row.getByRole("button", { name: "Ask now" }).focus();
+    expect(await focused()).toBe("BUTTON:Ask now");
+    await page.keyboard.press("Enter");
+    await expect(row.locator("span.chip-live")).toBeVisible();
+    expect(await readsBefore(page, row, activityComposer), "the running exercise reads before the composer").toBe(true);
+    expect(await focused(), "focus stayed on the button that opened the exercise").toBe("BUTTON:Close answers");
+
+    await instructor.context.close();
+  });
 });
