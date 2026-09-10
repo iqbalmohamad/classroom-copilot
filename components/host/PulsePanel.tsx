@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { PULSE_LABELS, PULSE_VALUES, type PulseRoundView } from "@/lib/types";
+import { PULSE_DISPLAY_LABELS, PULSE_VALUES, type PulseRoundView } from "@/lib/types";
 import type { HostAction } from "./types";
 
 const TONE: Record<string, string> = {
@@ -34,7 +34,9 @@ export function PulsePanel({
   act: HostAction;
   code: string;
 }) {
-  const [showHistory, setShowHistory] = useState(false);
+  // A console opened on an ended class has no current round (the end settles
+  // it), so the record — the earlier rounds — is what this panel is for now.
+  const [showHistory, setShowHistory] = useState(disabled && history.length > 0);
   const summary = round?.summary;
 
   return (
@@ -44,7 +46,11 @@ export function PulsePanel({
           Class pulse
         </div>
         <span className="tiny muted">
-          {summary ? `${summary.responded} of ${summary.total} responded` : "not asked yet"}
+          {summary
+            ? `${summary.responded} of ${summary.total} responded`
+            : disabled
+              ? "class ended"
+              : "not asked yet"}
         </span>
       </div>
 
@@ -56,12 +62,18 @@ export function PulsePanel({
       ) : null}
 
       {!summary || summary.responded === 0 ? (
-        <p className="empty">No one has set their pulse yet.</p>
+        <p className="empty">
+          {disabled
+            ? history.length > 0
+              ? "The class has ended — the rounds it answered are below."
+              : "The class ended without a pulse round."
+            : "No one has set their pulse yet."}
+        </p>
       ) : (
         <div>
           {PULSE_VALUES.map((value) => (
             <div className="bar-row" key={value}>
-              <span className="bar-label">{PULSE_LABELS[value]}</span>
+              <span className="bar-label">{PULSE_DISPLAY_LABELS[value]}</span>
               <span className="bar-track">
                 <span
                   className={`bar-fill ${TONE[value]}`}
@@ -96,10 +108,12 @@ export function PulsePanel({
         ) : null}
       </div>
 
-      <p className="tiny muted" style={{ margin: 0 }}>
-        Asking again starts a fresh round. Nothing is erased — the round below stays exactly as the
-        class left it.
-      </p>
+      {!disabled ? (
+        <p className="tiny muted" style={{ margin: 0 }}>
+          Asking again starts a fresh round. Nothing is erased — the round below stays exactly as
+          the class left it.
+        </p>
+      ) : null}
 
       {showHistory ? (
         <ul className="list">
@@ -114,7 +128,7 @@ export function PulsePanel({
                 <div>
                   {PULSE_VALUES.map((value) => (
                     <div className="bar-row" key={value}>
-                      <span className="bar-label">{PULSE_LABELS[value]}</span>
+                      <span className="bar-label">{PULSE_DISPLAY_LABELS[value]}</span>
                       <span className="bar-track">
                         <span
                           className={`bar-fill ${TONE[value]}`}

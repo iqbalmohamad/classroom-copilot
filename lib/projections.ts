@@ -597,7 +597,16 @@ export async function learnerSnapshot(
       }[]
     >`
       select id, seq, label, section_id, status from pulse_rounds
-      where room_id = ${room.id} and status = 'open' limit 1`,
+      where room_id = ${room.id}
+        ${
+          // Live, only an open round matters: a closed round's answer must not
+          // stay highlighted as if it carried into the next section. Once the
+          // class has ended there is nothing to carry into, so the last round
+          // is read instead — it is what keeps the learner's own final answer
+          // visible on their phone after the end.
+          room.status === "open" ? sql`and status = 'open'` : sql``
+        }
+      order by seq desc limit 1`,
   ]);
 
   // Only this learner's own rows. The query is keyed by their participant id,
@@ -653,16 +662,20 @@ export async function learnerSnapshot(
     })),
     spotlight: (lastPick[0]?.participant_id ?? null) === participantId,
     sections,
-    pulseRound: roundRows[0]
-      ? {
-          id: roundRows[0].id,
-          seq: roundRows[0].seq,
-          label: roundRows[0].label,
-          sectionTitle:
-            sections.find((section) => section.id === roundRows[0]!.section_id)?.title ?? null,
-          status: roundRows[0].status,
-        }
-      : null,
+    // Only a round that is actually collecting is offered as one to answer.
+    // After the end the query above may return the final, closed round — that
+    // exists to preserve `me.pulse`, not to present a round as live.
+    pulseRound:
+      roundRows[0] && roundRows[0].status === "open"
+        ? {
+            id: roundRows[0].id,
+            seq: roundRows[0].seq,
+            label: roundRows[0].label,
+            sectionTitle:
+              sections.find((section) => section.id === roundRows[0]!.section_id)?.title ?? null,
+            status: roundRows[0].status,
+          }
+        : null,
     activities: openActivityRows.map((row) => toActivityView(row, undefined, "learner")),
     mySubmissions: mySubmissionRows.map<MySubmission>((row) => ({
       activityId: row.activity_id,

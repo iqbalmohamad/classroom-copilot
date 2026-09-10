@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { api, ApiRequestError } from "@/lib/client/api";
 import { useRoomState } from "@/lib/client/useRoomState";
 import { ConnectionBadge } from "@/components/ConnectionBadge";
@@ -27,7 +28,12 @@ import { TimerChip } from "@/components/TimerChip";
  * Everything an instructor needs mid-lesson is on one screen: no tabs, no
  * modals, no navigation. The left column is what they act on (ask a question,
  * work the queue); the right column is the class itself — the screen they are
- * sharing, how learners get in, who is here and how the room feels.
+ * sharing, the clock, how the room feels, how learners get in and who is here.
+ *
+ * Both columns read live-first: what the class is doing right now comes before
+ * what it took to set that up. So the timer and the pulse sit above the join
+ * code and the instructor link, which are read once at the start of a class and
+ * are the largest thing in the column.
  */
 export function HostConsole({
   code,
@@ -40,8 +46,10 @@ export function HostConsole({
   qr: string | null;
   hostToken: string | null;
 }) {
+  const router = useRouter();
   const { snapshot, connection, refresh } = useRoomState(code, "instructor");
   const [error, setError] = useState<string | null>(null);
+  const [ending, setEnding] = useState(false);
   const [reviewing, setReviewing] = useState<string | null>(null);
 
   const act = useCallback(
@@ -59,6 +67,34 @@ export function HostConsole({
     },
     [code, refresh],
   );
+
+  /**
+   * End the class, then go to the summary — in that order, and only in that
+   * order. Navigation happens on the server's confirmed success, never
+   * optimistically, and nothing here marks the room ended locally: the room
+   * state a surface shows always comes from the server snapshot, so a failed
+   * request cannot leave this console (or anyone's phone) believing the class
+   * ended when it did not.
+   */
+  const endClass = useCallback(async () => {
+    if (!window.confirm("End this class? Learners will no longer be able to respond.")) return;
+    setEnding(true);
+    setError(null);
+    try {
+      // The server treats ending an already-ended class as success, so a retry
+      // whose first attempt actually landed still reaches the summary.
+      await api(`/api/rooms/${code}/end`, { method: "POST", code, role: "instructor" });
+      router.push(`/r/${code}/summary`);
+    } catch (err) {
+      setEnding(false);
+      // Always say what failed and that the class is still running; add the
+      // server's own reason when there is one, because "no network" and "this
+      // browser is no longer signed in as the instructor" need different fixes.
+      const detail = err instanceof ApiRequestError ? ` ${err.message}` : " Try again.";
+      setError(`Could not end the class — you are still live.${detail}`);
+      refresh();
+    }
+  }, [code, refresh, router]);
 
   if (connection === "denied") {
     // A captive portal or a filtered request can produce a single 403 mid-class.
@@ -129,7 +165,11 @@ export function HostConsole({
         </div>
       ) : null}
 
-      {error ? (
+      {/* Errors here are about acting on a live class ("could not end the
+          class — you are still live"). Once the snapshot says the class HAS
+          ended — an end whose response was lost, then discovered by refresh —
+          such an error is stale and now false, so the ended notice wins. */}
+      {error && !ended ? (
         <div className="notice notice-error" role="alert">
           {error}
         </div>
@@ -177,13 +217,6 @@ export function HostConsole({
             disabled={ended}
             act={act}
           />
-          <InvitePanel
-            code={code}
-            title={snapshot.room.title}
-            joinUrl={joinUrl}
-            qr={qr}
-            hostToken={hostToken}
-          />
           <TimerPanel
             code={code}
             timer={snapshot.timer}
@@ -197,6 +230,13 @@ export function HostConsole({
             disabled={ended}
             act={act}
             code={code}
+          />
+          <InvitePanel
+            code={code}
+            title={snapshot.room.title}
+            joinUrl={joinUrl}
+            qr={qr}
+            hostToken={hostToken}
           />
           <PickerPanel picks={snapshot.picks} disabled={ended} act={act} code={code} />
           <MaterialsPanel
@@ -213,13 +253,10 @@ export function HostConsole({
           {!ended ? (
             <button
               className="btn btn-danger btn-block"
-              onClick={() => {
-                if (window.confirm("End this class? Learners will no longer be able to respond.")) {
-                  void act(`/api/rooms/${code}/end`);
-                }
-              }}
+              disabled={ending}
+              onClick={() => void endClass()}
             >
-              End class
+              {ending ? "Ending…" : "End class"}
             </button>
           ) : null}
         </div>

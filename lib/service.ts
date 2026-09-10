@@ -88,13 +88,44 @@ export async function createRoom(title: string | undefined): Promise<{
 }
 
 export async function endRoom(room: RoomRow): Promise<void> {
+  // Ending an ended class is success, not failure. The second request is
+  // usually a retry whose first response was lost, and telling that instructor
+  // "something went wrong" would strand them in a class that has in fact ended.
+  if (room.status !== "open") return;
+
   await sql.begin(async (tx) => {
-    // Close any poll still collecting. Besides being the right end state, this
-    // is what stops an answer that was already in flight from landing in a room
-    // that has just ended: respondToPoll re-checks the poll status under a lock.
+    // The advisory lock first, like every other transaction that touches a
+    // room's collectors. Each settling statement below also writes `rooms`
+    // through the version trigger, and a learner's tap holds a round's share
+    // lock while waiting for `rooms` — interleaving with that is the exact
+    // deadlock the lock exists to remove (see setPulse). Taking it also
+    // means an in-flight learner write either commits entirely before the
+    // end (and is settled by it), or starts after it and sees the ended room.
+    await lockRoom(tx, room.id);
+
+    // Settle everything still collecting, in the same transaction that ends
+    // the room, so no surface can observe an ended class that still looks
+    // live. Polls were always closed here (it is also what stops an answer
+    // already in flight: respondToPoll re-checks status under a lock); open
+    // activities, the open pulse round and any live timer get the same
+    // treatment, each with its own guard so this whole block is idempotent.
+    // Closing the pulse round also fixes its record: an open round counts
+    // only *present* learners, so left open it would decay towards zero as
+    // phones disconnect after class.
     await closeOpenPolls(tx, room.id);
-    await tx`update rooms set status = 'ended', ended_at = now() where id = ${room.id}`;
-    await logEvent(tx, room.id, "room_ended");
+    await tx`update activities set status = 'closed', closed_at = now()
+             where room_id = ${room.id} and status = 'open'`;
+    await tx`update pulse_rounds set status = 'closed', closed_at = now()
+             where room_id = ${room.id} and status = 'open'`;
+    await tx`update timers set status = 'ended', ended_at = now()
+             where room_id = ${room.id} and status <> 'ended'`;
+    const ended = await tx<{ id: string }[]>`
+      update rooms set status = 'ended', ended_at = now()
+      where id = ${room.id} and status = 'open'
+      returning id`;
+    // Two concurrent end requests both reach here; only the one that actually
+    // flipped the room records the event.
+    if (ended.length > 0) await logEvent(tx, room.id, "room_ended");
   });
 }
 
@@ -275,13 +306,21 @@ export async function setPulse(
       returning id`;
     if (alive.length === 0) throw new ApiError("not_found", "You are no longer in this room.");
 
-    // The authoritative pulse context, read inside the lock that navigation
-    // and explicit round starts also hold. The room row this request loaded
-    // can be a navigation behind.
+    // The authoritative pulse context, read inside the lock that navigation,
+    // explicit round starts and End Class also hold. The room row this
+    // request loaded can be a navigation — or the end of the class — behind.
     const here = (
-      await tx<{ current_section_id: string | null; pulse_epoch: number }[]>`
-        select current_section_id, pulse_epoch from rooms where id = ${room.id}`
+      await tx<{ current_section_id: string | null; pulse_epoch: number; status: string }[]>`
+        select current_section_id, pulse_epoch, status from rooms where id = ${room.id}`
     )[0];
+
+    // Re-checked here, not just at the route boundary: a tap in flight while
+    // the instructor ends the class would otherwise pass the stale row's
+    // assertRoomOpen and — on the quick-start path, which no round id and no
+    // epoch change guards — open a brand-new round in a room that has ended.
+    if (here?.status !== "open") {
+      throw new ApiError("gone", "This class session has ended.");
+    }
 
     let round = (
       await tx<{ id: string; section_id: string | null }[]>`

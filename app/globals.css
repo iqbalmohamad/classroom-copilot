@@ -723,6 +723,33 @@ select {
   text-align: center;
 }
 
+/* The selected pulse must read without colour: the ring thickens (an inset
+   shadow, so nothing shifts) and a tick appears under the label. The colour
+   change below stays, but it is no longer the only signal. */
+.pulse-btn[data-active="true"] {
+  box-shadow: inset 0 0 0 2px currentColor;
+}
+
+.pulse-btn:disabled {
+  cursor: not-allowed;
+}
+
+.pulse-btn:disabled:not([data-active="true"]) {
+  opacity: 0.55;
+}
+
+/* Present on every pulse button so appearing never shifts the label; only the
+   selected one shows it. */
+.pulse-tick {
+  font-weight: 800;
+  line-height: 1;
+  visibility: hidden;
+}
+
+.pulse-btn[data-active="true"] .pulse-tick {
+  visibility: visible;
+}
+
 .pulse-btn[data-active="true"][data-value="got_it"] {
   background: var(--ok-soft);
   border-color: var(--ok);

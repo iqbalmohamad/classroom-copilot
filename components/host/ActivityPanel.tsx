@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
   ACTIVITY_FIELD_LABELS,
   type ActivityFieldType,
@@ -15,6 +15,12 @@ import type { HostAction } from "./types";
  * because that is what happens when a class needs an exercise it did not plan.
  * Fields, an instructor reference answer and a duration are preparation, so
  * they live behind "More options" rather than in the way.
+ *
+ * Preparation gives way once there is something to run. As soon as an exercise
+ * is open or has answers waiting, the list — its state, its answer count, its
+ * Review button — is read first and the composer drops below it, so a composer
+ * left expanded (and by then empty) cannot push the exercise the class is
+ * working on out of the instructor's way.
  */
 interface DraftField {
   label: string;
@@ -118,12 +124,23 @@ export function ActivityPanel({
     await act(`/api/rooms/${code}/activities/reorder`, { order });
   }
 
-  return (
-    <section className="card stack">
-      <div className="card-title" style={{ marginBottom: 0 }}>
-        Activities
-      </div>
+  /**
+   * Is there an exercise to operate, as opposed to one to prepare?
+   *
+   * Open means the class is answering it now; answers already in means there
+   * is a pile to review and, where the review left follow-ups, to act on.
+   * Either way that outranks composing the next one. Drafts do not: they are
+   * preparation, like the composer itself.
+   */
+  const running = activities.some(
+    (activity) => activity.status === "open" || activity.responseCount > 0,
+  );
 
+  // Both halves are keyed, so swapping them moves the existing fibers rather
+  // than rebuilding them: a half-written activity, an open editor and the
+  // More-options disclosure all survive the moment the first answer lands.
+  const composer = (
+    <Fragment key="composer">
       <div className="field">
         <label className="visually-hidden" htmlFor="activity-title">
           What should learners do?
@@ -276,7 +293,11 @@ export function ActivityPanel({
           </div>
         </div>
       ) : null}
+    </Fragment>
+  );
 
+  const prepared = (
+    <Fragment key="prepared">
       {activities.length === 0 ? (
         <p className="empty">Nothing yet. Ask something, or prepare it before class.</p>
       ) : null}
@@ -303,6 +324,16 @@ export function ActivityPanel({
           ))}
         </div>
       ))}
+    </Fragment>
+  );
+
+  return (
+    <section className="card stack">
+      <div className="card-title" style={{ marginBottom: 0 }}>
+        Activities
+      </div>
+
+      {running ? [prepared, composer] : [composer, prepared]}
     </section>
   );
 }
