@@ -156,10 +156,18 @@ function JoinForm({ code, onJoined }: { code: string; onJoined: () => void }) {
 function LearnerRoom({ code, onLeave }: { code: string; onLeave: () => void }) {
   const { snapshot, connection, refresh } = useRoomState(code, "learner");
   const [notice, setNotice] = useState<string | null>(null);
+  const ended = snapshot?.room.status === "ended";
 
   useEffect(() => {
-    if (connection === "denied") onLeave();
-  }, [connection, onLeave]);
+    // A denial mid-class sends the learner to the join form, which re-admits
+    // them with the token they already hold. Once the class has ended there is
+    // nothing to re-admit into — joining an ended room is refused — and what
+    // is on screen is the record of this learner's own work, so a stray 403
+    // (a captive portal on the walk out of the venue) must not swap that
+    // record for a dead join form. The ended view is static; it loses nothing
+    // by staying up without a connection.
+    if (connection === "denied" && !ended) onLeave();
+  }, [connection, ended, onLeave]);
 
   const flash = useCallback((message: string) => {
     setNotice(message);
@@ -173,8 +181,6 @@ function LearnerRoom({ code, onLeave }: { code: string; onLeave: () => void }) {
       </main>
     );
   }
-
-  const ended = snapshot.room.status === "ended";
 
   return (
     <main className="learner-shell stack">

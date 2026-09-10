@@ -402,6 +402,19 @@ test.describe("a live class, across five browsers", () => {
     );
     await expect(learner.page.getByText("JOINs match rows across tables")).toBeVisible();
 
+    // The walk out of the venue: a captive portal starts answering 403 to
+    // everything. Joining an ended room is refused, so being sent to the join
+    // form here would be a dead end — the ended record must simply stay up.
+    await learner.page.route("**/api/rooms/**", (route) =>
+      route.fulfill({ status: 403, contentType: "application/json", body: '{"error":{"code":"forbidden","message":"blocked"}}' }),
+    );
+    await learner.page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await learner.page.waitForTimeout(1500);
+    await expect(learner.page.getByText(/your instructor has ended this class/i)).toBeVisible();
+    await expect(learner.page.getByLabel(/your name/i)).toHaveCount(0);
+    await expect(learner.page.getByText("JOINs match rows across tables")).toBeVisible();
+    await learner.page.unroute("**/api/rooms/**");
+
     await learner.context.close();
     await instructor.context.close();
   });
