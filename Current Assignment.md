@@ -1,37 +1,34 @@
-> **Superseded in part — classroom workflow expansion (September 2026).**
->
-> This document describes the M0 implementation assignment, which is complete.
-> A later assignment expanded the scope to the taught-session workflow: sections,
-> pulse rounds, open-ended activities with review and feedback, timers,
-> materials, contextual questions, session plans, and the extended summary and
-> export. Read `README.md` for what the product does now; the engineering
-> priorities and constraints below still apply.
+# Current Assignment — M0: End Class + Pulse Polish
 
-# Current Assignment — M0: First Classroom
+**Status:** READY FOR IMPLEMENTATION
+**Milestone:** M0 — First Classroom
+**Target live usage:** September 13, 2026
+**Feature freeze:** September 12, 2026 — this assignment must be implemented and through QA before the freeze. After the freeze, only bug fixes from this assignment's QA are allowed.
 
-**Status:** READY FOR IMPLEMENTATION  
-**Milestone:** M0 — First Classroom  
-**Target live usage:** September 13, 2026  
-**Feature freeze:** September 12, 2026
+This replaces the previous M0 implementation assignment, which is complete
+(see git history of this file and `README.md` for what shipped). The
+engineering priorities and constraints of that assignment still apply and are
+restated below where they matter.
 
 ---
 
 # Role
 
-You are the primary software engineer responsible for implementing Classroom Copilot M0.
+You are the implementation engineer for Classroom Copilot. The Product Owner
+teaches a real live class with this product on September 13, 2026.
 
-The Product Owner will use this product in a real live class on September 13, 2026.
+Optimize, in order, for:
 
-Prioritize:
+1. reliability in a real classroom;
+2. mandatory M0 behavior;
+3. realtime correctness;
+4. refresh/reconnect resilience;
+5. mobile learner usability;
+6. avoiding unnecessary scope before first classroom use.
 
-1. reliability;
-2. classroom usability;
-3. speed of delivery;
-4. clean enough engineering to continue development later.
-
-Do not optimize for theoretical future scale.
-
-Do not redesign the product.
+Do not introduce optional AI work. Do not start a desktop redesign — a
+dedicated desktop UI/UX audit will be created as a separate assignment after
+this one passes QA.
 
 ---
 
@@ -39,684 +36,348 @@ Do not redesign the product.
 
 Read before implementation:
 
-1. `PRD.md`
-2. this `Current Assignment.md`
+1. `PRD.md` — product intent, scope, principles, milestone boundaries;
+2. this `Current Assignment.md` — the active engineering work;
+3. `README.md` — what the product does today and how to run and test it.
 
-Use:
+If they appear inconsistent, do not silently expand scope. Prefer the narrower
+interpretation that protects the September 13 classroom delivery.
 
-- `PRD.md` for product intent, scope, principles, and milestone boundaries;
-- `Current Assignment.md` for active engineering work.
+## Terminology
 
-If they appear inconsistent, do not silently expand scope.
+This assignment uses the product's requested terms **mentor** and **student**.
+In this codebase they map exactly to the existing terms:
 
-Prefer the narrower interpretation that protects the September 13 classroom delivery.
+- **mentor** = instructor (host token, `/r/<CODE>/host`, `role=instructor`);
+- **student** = learner (learner token, `/r/<CODE>`, `role=learner`).
 
----
-
-# Objective
-
-Implement a deployable browser-based live classroom interaction application.
-
-The Product Owner must be able to:
-
-1. create a room;
-2. share a room code or URL;
-3. allow learners to join from phones;
-4. run realtime polls;
-5. observe Class Pulse;
-6. receive anonymous questions;
-7. select participants;
-8. screen-share a clean classroom view;
-9. review a basic session summary.
-
-The entire classroom flow must work without AI.
+Implement using the codebase's existing `instructor`/`learner` vocabulary.
+Do not rename identifiers, routes, or roles as part of this assignment.
 
 ---
 
-# Required User Flows
+# Scope
 
-## Flow A — Instructor starts class
+Exactly two workstreams. Nothing else.
 
-Instructor:
+## Workstream 1 — End Class behavior
 
-1. opens application;
-2. creates a new room;
-3. receives room code and join URL;
-4. opens Instructor Console;
-5. optionally opens Public View in another tab/window.
+### What already exists — verify and build on it, do not rebuild it
+
+- `POST /api/rooms/[code]/end` (`app/api/rooms/[code]/end/route.ts`) →
+  `endRoom` in `lib/service.ts`: closes any open poll, sets
+  `rooms.status = 'ended'` and `ended_at`, logs the event. The version
+  trigger bumps `rooms.version`, so every connected client receives the ended
+  snapshot over the existing realtime transport without refresh.
+- `assertRoomOpen` (`lib/service.ts`, `lib/workflow.ts`) refuses every
+  mutation against an ended room with HTTP 410 and the message
+  "This class session has ended." — this is the server-side backstop and it
+  already guards polls, pulse, questions, votes, activities, timers,
+  materials, sections, and picks.
+- All three surfaces already render an ended state: the host console shows a
+  notice and disables its panels (`app/r/[code]/host/HostConsole.tsx`), the
+  learner view shows "This class has ended. Thanks for taking part." and
+  passes `disabled` to every input card (`app/r/[code]/LearnerView.tsx`), and
+  the presentation screen shows a closing message
+  (`app/r/[code]/screen/PublicView.tsx`).
+- Joining an ended room is refused with 410; the instructor's summary stays
+  readable after the end (`tests/integration/room-lifecycle.test.ts`); one
+  e2e test proves the connected learner flips to ended without refresh
+  (`e2e/classroom.spec.ts`, "ends the class cleanly for everyone still
+  connected").
+
+The work below is the gap between that and the required behavior.
+
+### Mentor (instructor)
+
+When the mentor's End Class action **succeeds** (the `/end` request returned
+success):
+
+1. The class transitions to the ended state (already implemented — keep it).
+2. The mentor is automatically taken to the Class Summary view for that class
+   (`/r/<CODE>/summary`). Navigate only on a confirmed successful response —
+   never optimistically.
+3. Already available session results remain visible on the summary: counts,
+   poll distributions, pulse rounds, activities and their review states,
+   questions, picks — whatever the summary already shows for that class.
+4. If some summary data is still being prepared or still loading, show the
+   summary's existing loading/processing state ("Loading summary…") rather
+   than blocking the navigation or the page. Do not build a new
+   summary-preparation pipeline; the summary is computed on read today and
+   that stays.
+5. The mentor can return to the dashboard (the home page `/`) using the
+   normal product flow. The summary currently links back to the console; make
+   sure a route back to `/` exists from the post-class flow using the
+   existing navigation conventions (a small link/button is enough).
+
+Auto-navigation applies to the mentor's **own successful End Class action in
+that tab**, and only to it. A console that merely observes the room become
+ended (a second console tab, a console reopened later) shows the existing
+ended notice and keeps the summary reachable — it must not be yanked into a
+navigation it did not initiate.
+
+### Student (learner)
+
+Without requiring a manual refresh (i.e., delivered through the existing
+realtime snapshot):
+
+1. The live class view changes to a clear **Class Ended** state.
+2. Show a clear message equivalent to "Your mentor has ended this class."
+   Using the product's own vocabulary, the required copy is:
+   **"Your instructor has ended this class."** (A short thanks line may
+   follow, matching the existing tone.) The current message does not name the
+   actor; this one must.
+3. Live activities stop accepting new input: poll answers, pulse taps,
+   activity submissions and edits, question submission, and upvotes are all
+   disabled in the UI (mostly already wired via `disabled={ended}` — verify
+   every input, including inside `ActivityCard`). The server's 410 remains
+   the backstop for anything in flight.
+4. Already submitted answers remain preserved and visible: the student's poll
+   answer, their pulse choice, their activity submissions and any private
+   feedback on them, and revealed results they could already see must not
+   disappear when the class ends.
+5. The student can view whatever personal/session summary they are currently
+   permitted to see. Today that is exactly what their own view already
+   shows — their submissions, feedback, and revealed aggregates. **Do not
+   build a new student-facing summary page**, and do not widen student access
+   to the instructor summary.
+6. The student can return to the appropriate home/exit destination: give the
+   ended state a clear way back to the home page `/`, using existing UI
+   conventions.
+
+### Ended state must survive re-entry
+
+The ended state must also be correct when the student:
+
+- **refreshes the page** — a student with an existing session for the room
+  lands directly in the ended class view (not the join form), with their
+  preserved submissions visible;
+- **reconnects after losing connection** — the stream or its polling
+  fallback delivers the ended snapshot; the ended UI appears without user
+  action;
+- **reopens the class URL after the class has ended** — same as refresh for
+  a student who had joined. A visitor who never joined gets the join surface
+  with a clear "this class session has ended" refusal when they try (the 410
+  path — verify the join form surfaces its message legibly, especially on a
+  phone).
+
+The same re-entry correctness applies to the mentor's console and the
+presentation screen: reopening either on an ended class shows the ended
+state, never a live-looking one. In particular, an ended class must not
+present anything as still collecting or still counting down (open activity,
+running timer, open pulse round). Settle these at end time server-side (the
+way `endRoom` already closes open polls) or present them as closed in the
+ended projections — choose the smallest change that makes every surface and
+the summary read correctly; do not build new lifecycle machinery.
+
+### Failure behavior
+
+If the mentor's End Class action fails (network error, server error, denied):
+
+1. do **not** falsely transition anything to ended — no navigation, no ended
+   UI. The room state shown must continue to come from the server snapshot,
+   never from an assumed success;
+2. keep the mentor in the current class view, still live and functional;
+3. show an understandable failure state: a visible error that names the
+   action and makes clear the class is still running (e.g. "Could not end
+   the class — you are still live. Try again."), not a generic toast;
+4. allow the mentor to retry: the End Class control stays available and a
+   second attempt works. If the first attempt actually succeeded but the
+   response was lost, the retry must be harmless (ending an ended room must
+   not error in a way that strands the mentor — treat "already ended" as
+   success).
+
+### In-progress input decision (explicit, for M0)
+
+Do **not** introduce new draft-persistence functionality for this edge case.
+If a student is typing or has selected something but has not submitted it
+when the class ends:
+
+- do not auto-submit it;
+- do not treat it as a submitted answer;
+- disable further live submission as soon as the ended state is received;
+- a submit that was already in flight and is refused by the server (410) gets
+  the understandable ended message, not a raw error.
+
+Anything already successfully submitted before the class ended must remain
+preserved (server-side this is already true; verify the UI never hides it).
+
+## Workstream 2 — Class Pulse polish
+
+### Labels
+
+Keep the existing English labels, but render them consistently as:
+
+- `✅ Got it`
+- `🤔 Shaky`
+- `🆘 Lost`
+
+Apply this anywhere the pulse choice or result is **shown on screen** to the
+mentor or the student:
+
+- the student's three pulse buttons (`app/r/[code]/LearnerView.tsx`);
+- the mentor's Class Pulse panel — current round and earlier rounds
+  (`components/host/PulsePanel.tsx`);
+- the session summary's pulse readouts (`app/r/[code]/summary/SummaryView.tsx`),
+  including its print view.
+
+Labels are defined once in `PULSE_LABELS` (`lib/types.ts`); keep a single
+source of truth for the on-screen form rather than sprinkling emoji through
+components. Two deliberate exceptions, because they are data rather than UI:
+
+- the **CSV export** (`lib/export.ts`) keeps plain-text labels — emoji in CSV
+  risks spreadsheet encoding problems for zero classroom value;
+- the **AI Class Read prompt** (`lib/ai.ts`) keeps plain-text labels.
+
+Do not change `Shaky` to `Not sure` in this assignment.
+
+### Selected state — more than color alone
+
+The student's currently selected pulse option must be visually obvious
+without relying only on color. Today the selection is shown purely by
+color/background/border-color change (`.pulse-btn[data-active="true"]` in
+`app/globals.css`) plus `aria-pressed`. Add a non-color signal using the
+product's existing conventions — an appropriate combination of:
+
+- border weight/treatment;
+- shape/background treatment;
+- icon/text treatment (the poll answer buttons' ✓ tick, `.answer-tick`, is
+  the established convention for "this is yours");
+- selected/pressed state (`aria-pressed` stays).
+
+Acceptance heuristic: the selected option must be identifiable in a grayscale
+screenshot. Note the label emoji do not count as a selection signal — every
+button has one.
+
+Do not redesign the pulse interaction beyond this polish: same three buttons,
+same tap-to-change semantics, same rounds/epoch mechanics, same
+aggregate-only privacy. Keep the touch targets at their current size or
+larger (≥44px), and keep the three buttons fitting a phone width without
+overflow with the emoji added.
 
 ---
 
-## Flow B — Learner joins
+# Explicitly out of scope
 
-Learner:
+Do not include in this assignment:
 
-1. opens join URL or enters room code;
-2. enters display name;
-3. joins room;
-4. appears in instructor roster;
-5. can participate without account creation.
-
-Learner UI must be usable on a typical smartphone.
-
----
-
-## Flow C — Live poll
-
-Instructor:
-
-1. creates/selects a poll;
-2. enters question;
-3. selects type;
-4. opens poll.
-
-Supported M0 types:
-
-- Yes / No;
-- A/B/C/D multiple choice;
-- confidence scale 1–5.
-
-Learners:
-
-1. see active question;
-2. submit answer;
-3. see confirmation.
-
-Instructor:
-
-1. sees response count update;
-2. can close poll;
-3. can reveal aggregate results.
-
-Aggregate results may be shown on Public View.
-
-Do not publicly reveal individual learner answers.
+- broad desktop UI/UX redesign, alternative desktop layouts, or new
+  navigation architecture (a dedicated desktop UI/UX audit follows this
+  assignment after QA);
+- unrelated visual cleanup;
+- new AI features, or any change to AI Class Read beyond the label exception
+  noted above;
+- a new draft-persistence system;
+- unrelated summary redesign (the summary changes only as far as Workstream 1
+  requires: reachable after end, correct ended reading, a route home);
+- renaming `Shaky`;
+- refactors not needed to complete this behavior safely;
+- anything in `PRD.md` §15 (M0 non-goals) or the standing exclusions in
+  `README.md` (no accounts, no LMS, no SQL execution engine, no automated
+  grading, no chat or video, no AI that acts on the classroom).
 
 ---
 
-## Flow D — Class Pulse
+# Verification
 
-Learner can choose:
+## Required setup — two simultaneous clients, minimum
 
-- Got it;
-- Shaky;
-- Lost.
+Every End Class QA pass runs with at least:
 
-Instructor sees aggregate current class state.
+- **one mentor** (instructor console, desktop browser);
+- **one student** (learner view, mobile viewport — a real phone or the
+  existing Playwright phone profile).
 
-A learner should be able to update their pulse during the session.
+Both connected to the same room at the same time. The existing e2e harness
+(`e2e/`) already drives one instructor plus phone-viewport learners
+concurrently — extend it; state must arrive over realtime, and no test may
+reload a page to make an assertion pass (existing suite rule — keep it,
+except in the scenarios that explicitly test refresh/reopen).
 
-The implementation must prevent a single learner session from artificially counting as multiple simultaneous pulse responses.
+## QA checklist — all must pass
 
----
+1. Mentor ends class successfully (confirm → success response).
+2. Mentor lands on the Class Summary for that class automatically, and
+   available results are visible (loading state acceptable while it loads).
+3. The connected student changes to the Class Ended state — message naming
+   the instructor — without manual refresh.
+4. The student can no longer submit live activity responses (poll, pulse,
+   activity, question, upvote all disabled; a forced/in-flight submit is
+   refused with the ended message).
+5. Previously submitted responses remain preserved and visible to the
+   student (including activity submissions and any feedback) and countable
+   in the summary.
+6. Student refresh after class ended → ended state, same identity, preserved
+   submissions; never the join form for a student who had joined.
+7. Student reconnect after class ended (kill the connection, restore it) →
+   ended state arrives without user action.
+8. Student reopens an already-ended class URL → ended state; a never-joined
+   visitor attempting to join gets a clear "session has ended" refusal.
+9. End Class failure (simulate: network offline or server 500) does not
+   create a false ended state anywhere — mentor stays in the live class with
+   a clear failure message; students see no change.
+10. Mentor can retry after a failed End Class, and the retry works; retrying
+    an already-ended class does not strand the mentor.
+11. Pulse labels render as `✅ Got it` / `🤔 Shaky` / `🆘 Lost` on the
+    student buttons, the mentor's pulse panel (current and history), and the
+    summary.
+12. The selected pulse option is distinguishable without relying on color
+    (grayscale check), and `aria-pressed` still reports it.
+13. Existing mobile learner usability is not materially regressed: no
+    horizontal overflow, touch targets ≥44px, and the existing mobile e2e
+    checks still pass with the new labels and ended-state UI.
 
-## Flow E — Anonymous questions
+## Automated tests
 
-Learner can:
+Preserved from the previous assignment — these categories still apply and the
+existing suites must stay green:
 
-- enter question text;
-- submit anonymously;
-- view active questions if appropriate;
-- upvote a question.
+- **Unit/integration** (`npm test`): keep every existing test passing
+  (labels changed in UI must not break label-based assertions — update
+  assertions, never delete coverage). Extend integration coverage where the
+  new behavior is server-visible: end-while-in-flight submission refusal;
+  ending an already-ended room behaves as success/no-op; ended room settles
+  or presents open collectors (activity/timer/pulse round) as closed.
+- **Multi-client e2e** (`npm run test:e2e`): extend the existing end-class
+  scenario to cover the mentor's auto-navigation to the summary, the
+  student's instructor-named ended message, preserved submissions after end,
+  and student refresh/reopen of an ended class. Add the failure-path
+  scenario (blocked `/end` → no false ended state, retry works) using
+  Playwright request interception.
+- **Mobile viewport**: the ended state and the new pulse labels verified at
+  the existing phone profile (overflow and touch-target checks stay).
+- **Full check before handoff**: `npm run verify` (typecheck + unit +
+  integration) and `npm run test:e2e` pass; run `npm run test:workers` if the
+  environment allows, since Workers is the deployment target.
 
-Instructor can:
-
-- see submitted questions;
-- see upvote counts;
-- mark question answered.
-
-Do not implement threaded discussion.
-
----
-
-## Flow F — Participant Picker
-
-Instructor can select a joined learner.
-
-Required behavior:
-
-- randomly select from active/joined roster;
-- visibly display selected learner;
-- retain session selection history;
-- avoid immediate repeated selection where practical.
-
-Do not implement AI-based participant selection.
-
----
-
-## Flow G — Public View
-
-Instructor can open a separate screen suitable for screen sharing.
-
-It should support states such as:
-
-- room join screen;
-- active question;
-- aggregate poll result;
-- participant selected;
-- neutral/waiting state.
-
-Public View must never expose:
-
-- instructor-only controls;
-- learner private data;
-- hidden individual responses;
-- sensitive session internals.
-
----
-
-## Flow H — Session Summary
-
-Instructor can view a basic session summary.
-
-Include where practical:
-
-- session date/time;
-- total learners joined;
-- poll history;
-- aggregate poll results;
-- questions submitted;
-- class pulse data;
-- participant-picker history;
-- basic participation counts.
-
-No sophisticated visualization is required.
-
-Clarity is more important than visual complexity.
+No schema migration is expected for this assignment. If you find one is
+genuinely required, stop and justify it in the report before writing it —
+September 13 is close and `README.md` documents why mid-class cutovers are
+dangerous.
 
 ---
 
-# Realtime Requirements
-
-At minimum, realtime updates must apply to:
-
-- learner joins;
-- poll responses;
-- poll state;
-- class pulse;
-- submitted questions;
-- question upvotes;
-- question answered state;
-- participant selection where relevant;
-- public-view state.
-
-The instructor must not need to manually refresh during normal classroom use.
-
----
-
-# State and Persistence
-
-Persist enough state that common browser refreshes do not destroy a live classroom.
-
-At minimum, consider persistence for:
-
-- room;
-- instructor session identity;
-- learner identity/session;
-- roster;
-- active poll;
-- poll responses;
-- pulse;
-- questions;
-- upvotes;
-- picker history;
-- session events.
-
-Do not create a complex identity system.
-
-Anonymous/session-based learner identity is sufficient for M0.
-
----
-
-# UX Requirements
-
-## Instructor
-
-Instructor Console should make common controls obvious.
-
-Do not bury classroom actions behind deep navigation.
-
-Primary classroom controls should be reachable quickly.
-
----
-
-## Learner
-
-Design mobile-first.
-
-A learner should not need to understand the product.
-
-The expected mental model is:
-
-1. join;
-2. see current classroom action;
-3. respond.
-
----
-
-## Public display
-
-Use large readable typography and minimal visual clutter.
-
-Assume it may be viewed through screen share or projector.
-
----
-
-# Suggested Technical Approach
-
-Choose the simplest reliable architecture.
-
-Preferred direction:
-
-- Next.js;
-- TypeScript;
-- React;
-- Supabase for database and realtime;
-- simple production deployment such as Vercel.
-
-Alternatives are acceptable if they materially improve delivery reliability.
-
-Do not introduce:
-
-- microservices;
-- Kubernetes;
-- Kafka;
-- Redis unless genuinely necessary;
-- custom realtime protocol;
-- separate mobile app;
-- complicated infrastructure.
-
-The application should be straightforward for another engineer to run locally.
-
----
-
-# Data Model Guidance
-
-Exact schema is an engineering decision.
-
-Likely concepts include:
-
-- room/session;
-- participant;
-- poll;
-- poll option;
-- poll response;
-- class pulse state;
-- question;
-- question upvote;
-- picker event;
-- session event.
-
-Keep schema understandable and normalized enough to avoid obvious integrity problems.
-
-Do not over-model future milestones.
-
----
-
-# AI
-
-AI is NOT required for M0 pass.
-
-Do not begin with AI.
-
-Only consider the optional `AI Class Read` after all mandatory classroom functionality is stable.
-
-If implemented:
-
-Input:
-
-- aggregate poll result;
-- aggregate pulse;
-- current anonymous questions.
-
-Output:
-
-- maximum a few short sentences;
-- advisory only;
-- no autonomous action.
-
-Example:
-
-> Understanding appears mixed. Consider another worked example before continuing.
-
-Requirements:
-
-- AI provider key server-side only;
-- graceful failure;
-- the rest of the application must function when AI is unavailable.
-
-If AI jeopardizes delivery, remove it.
-
----
-
-# Testing Requirements
-
-Do not rely solely on unit tests.
-
-Before declaring M0 ready, validate actual multi-user behavior.
-
-Required testing categories:
-
-## Automated
-
-Cover important logic and critical paths where practical.
-
-Examples:
-
-- room creation;
-- room joining;
-- poll lifecycle;
-- duplicate response handling;
-- pulse update semantics;
-- picker logic;
-- permission boundaries.
-
----
-
-## Multi-client simulation
-
-Use multiple browser sessions.
-
-Validate:
-
-- one instructor;
-- multiple learners;
-- concurrent poll responses;
-- realtime updates;
-- question upvotes;
-- refresh/reconnect.
-
----
-
-## Mobile
-
-At minimum validate a representative mobile viewport.
-
-Important screens:
-
-- join;
-- learner home;
-- poll response;
-- pulse;
-- question submission.
-
----
-
-## Failure scenarios
-
-Test:
-
-- invalid room code;
-- closed/nonexistent room;
-- duplicate join;
-- instructor refresh;
-- learner refresh;
-- network interruption where reasonably testable;
-- poll closes during response;
-- empty participant picker;
-- participant disconnects.
-
----
-
-# Deployment Requirement
-
-M0 is not complete if it only runs locally.
-
-Provide a production-accessible deployment suitable for the September 13 class.
-
-Document:
-
-- production URL;
-- environment variables;
-- deployment procedure;
-- local development instructions;
-- database setup/migrations.
-
-No secrets may be committed.
-
----
-
-# README Requirement
-
-Create/update `README.md` with:
-
-- concise product description;
-- stack;
-- local setup;
-- environment configuration;
-- database setup;
-- development commands;
-- test commands;
-- production/deployment notes;
-- current M0 scope.
-
-Do not turn README into a product strategy document.
-
-That belongs in `PRD.md`.
-
----
-
-# Explicit Non-Goals
-
-Do NOT implement:
-
-- subscriptions;
-- payment integration;
-- complex authentication;
-- institution accounts;
-- LMS;
-- Google Classroom;
-- Moodle;
-- native apps;
-- physical classroom cards;
-- QR card scanning;
-- computer vision;
-- facial recognition;
-- attention detection;
-- emotion detection;
-- student AI tutor;
-- AI teaching agent;
-- advanced analytics;
-- curriculum engine;
-- content marketplace;
-- leaderboard;
-- badge system;
-- chat;
-- video calls;
-- breakout-room system;
-- PowerPoint add-in;
-- Google Slides add-in;
-- browser extension.
-
-Do not pre-implement future milestone features.
-
----
-
-# Quality Bar
-
-This is a rapid product milestone, not a throwaway prototype.
-
-Acceptable:
-
-- simple architecture;
-- limited visual polish;
-- small amount of pragmatic technical debt;
-- managed services;
-- narrow scope.
-
-Not acceptable:
-
-- fragile classroom state;
-- obvious security mistakes;
-- broken mobile experience;
-- fake realtime behavior;
-- critical state existing only in one browser's memory;
-- undocumented setup;
-- features that only work in a happy-path demo.
-
----
-
-# Delivery Sequence
-
-## September 8
-
-Establish:
-
-- repository/application skeleton;
-- chosen stack;
-- database;
-- room creation;
-- room join;
-- basic realtime connectivity.
-
-Target state:
-
-> Instructor and learner browsers can join the same room and observe shared realtime state.
-
----
-
-## September 9
-
-Implement:
-
-- roster;
-- polls;
-- Class Pulse;
-- Participant Picker.
-
-Target state:
-
-> Core classroom interaction works.
-
----
-
-## September 10
-
-Implement:
-
-- anonymous Q&A;
-- upvotes;
-- Public View;
-- classroom UX cleanup.
-
-Target state:
-
-> Complete live-class flow exists.
-
----
-
-## September 11
-
-Implement:
-
-- session summary;
-- missing persistence/reconnect behavior;
-- production hardening;
-- optional AI Class Read only if safe.
-
-Target state:
-
-> Feature-complete candidate.
-
----
-
-## September 12
-
-FEATURE FREEZE.
-
-Only:
-
-- bug fixes;
-- usability fixes;
-- responsive fixes;
-- multi-client testing;
-- reconnect testing;
-- deployment verification;
-- classroom rehearsal.
-
-Do not add speculative features.
-
----
-
-## September 13
-
-Real classroom usage.
-
-The live class is the primary M0 product test.
-
----
-
-# Acceptance Criteria
-
-M0 is PASS only when all mandatory criteria are satisfied.
-
-## Product
-
-- instructor can create room;
-- learner can join;
-- learner experience works on phone;
-- roster updates;
-- realtime poll works;
-- Yes/No works;
-- A/B/C/D works;
-- confidence scale works;
-- poll close/reveal works;
-- Class Pulse works;
-- anonymous question submission works;
-- question upvote works;
-- instructor can mark answered;
-- participant picker works;
-- Public View works;
-- session summary works.
-
-## Reliability
-
-- instructor refresh does not destroy session;
-- normal learner refresh can recover sufficiently;
-- multiple learners can interact concurrently;
-- app behaves gracefully on invalid input;
-- production deployment is available.
-
-## Privacy
-
-- learner cannot access instructor controls;
-- public view does not expose private data;
-- individual answers are not publicly revealed accidentally;
-- application secrets are not client-exposed.
-
-## Documentation
-
-- README is usable;
-- setup is reproducible;
-- deployment is documented.
-
-## Final milestone gate
-
-> Product Owner successfully uses Classroom Copilot end-to-end in a real live class on September 13, 2026.
-
----
-
-# Stop Condition
-
-Once all mandatory acceptance criteria are met and the production build is stable:
-
-STOP.
-
-Do not continue into:
-
-- AI pedagogy;
-- school mode;
-- monetization;
-- advanced analytics;
-- future milestones.
-
-Report:
-
-1. implementation summary;
-2. architecture/stack selected;
-3. files/components added;
-4. tests performed;
-5. known limitations;
-6. production deployment state;
-7. remaining risks for September 13;
-8. recommendation: `READY FOR CLASS`, `READY WITH CAVEATS`, or `NOT READY`.
+# Acceptance criteria
+
+This assignment is PASS only when:
+
+- every item in the QA checklist above passes with the two-client setup;
+- all automated suites pass as described;
+- no mandatory M0 behavior regressed (create/join/poll/pulse/questions/
+  picker/public view/summary all still work end-to-end);
+- no new scope from the out-of-scope list crept in;
+- the diff is reviewable: small, focused on the two workstreams, matching
+  existing code conventions.
+
+# Stop condition
+
+When the acceptance criteria are met: STOP. Do not continue into desktop
+redesign, AI work, or any future milestone. Then report:
+
+1. implementation summary per workstream;
+2. files/components changed;
+3. tests added or updated, and the results of each suite;
+4. any behavior decision made where this document allowed a choice (e.g. how
+   open collectors are settled at end time);
+5. known limitations or risks remaining for September 13;
+6. recommendation: `READY FOR CLASS`, `READY WITH CAVEATS`, or `NOT READY`.
